@@ -262,7 +262,10 @@ document.addEventListener('DOMContentLoaded',function(){
 
   document.addEventListener('click',function(e){
     document.querySelectorAll('.post-dropdown.open').forEach(function(dd){
-      if(!dd.parentElement.contains(e.target))dd.classList.remove('open');
+      if(!dd.parentElement.contains(e.target)){
+        dd.classList.remove('open');
+        var tr=dd.closest('tr');if(tr)tr.classList.remove('has-open-dd');
+      }
     });
     if(!warnOpen&&getDirtyCount()>0){
       var tgt=e.target;
@@ -680,8 +683,13 @@ function drawRows(recs,highlightQuery){
     el.addEventListener('click',function(e){
       e.stopPropagation();
       var dd=this.querySelector('.post-dropdown');
-      document.querySelectorAll('.post-dropdown.open').forEach(function(x){if(x!==dd)x.classList.remove('open');});
-      dd.classList.toggle('open');
+      document.querySelectorAll('.post-dropdown.open').forEach(function(x){
+        x.classList.remove('open');
+        var tr=x.closest('tr');if(tr)tr.classList.remove('has-open-dd');
+      });
+      var isOpen=dd.classList.toggle('open');
+      var tr=this.closest('tr');
+      if(tr)tr.classList.toggle('has-open-dd',isOpen);
     });
   });
   tbody.querySelectorAll('.post-opt').forEach(function(el){
