@@ -929,9 +929,23 @@ function chiudi(id){var el=document.getElementById(id);if(el)el.classList.remove
 // GESTIONE POSTAZIONI
 // ═══════════════════════════════════════════════════════════════════
 
+function mpostErrShow(msg){
+  var el=document.getElementById('mpostErr');
+  var sp=document.getElementById('mpostErrMsg');
+  if(!el||!sp)return;
+  sp.textContent=msg;
+  el.style.display='flex';
+}
+
+function mpostErrHide(){
+  var el=document.getElementById('mpostErr');
+  if(el)el.style.display='none';
+}
+
 function apriGestPost(){
   var wrap=document.getElementById('postListWrap');
   if(!wrap){fb(false,'Errore','Contenitore postazioni non trovato.');return;}
+  mpostErrHide();
   wrap.innerHTML='';
   if(Array.isArray(POST)&&POST.length){
     POST.forEach(function(p){
@@ -1036,11 +1050,12 @@ function salvaPostazioni(){
       btn.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path><polyline points="17 21 17 13 7 13 7 21"></polyline><polyline points="7 3 7 8 15 8"></polyline></svg> Salva postazioni';
     }
     if(r&&r.success){
+      mpostErrHide();
       chiudi('mpost');
       fb(true,'Salvate',r.message||'Postazioni aggiornate.');
       loadPost();loadRows(1);
     } else {
-      fb(false,'Errore',r&&r.message?r.message:'Errore durante il salvataggio.');
+      mpostErrShow(r&&r.message?r.message:'Errore durante il salvataggio.');
     }
   }).catch(function(){
     if(btn){btn.disabled=false;btn.innerHTML='Salva postazioni';}
