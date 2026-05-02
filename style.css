@@ -104,6 +104,7 @@ tbody td{padding:.75rem 1rem;vertical-align:top;font-size:clamp(.875rem,.8rem + 
 .ptag svg{flex-shrink:0;opacity:.8}
 .post-dropdown{position:absolute;top:calc(100% + 6px);left:0;background:var(--surface);border:1px solid var(--bord);border-radius:var(--r2);box-shadow:var(--sh3);z-index:200;min-width:160px;overflow:hidden;display:none}
 .post-dropdown.open{display:block}
+tr.has-open-dd{position:relative;z-index:300}
 .post-opt{display:flex;align-items:center;gap:.5rem;padding:.5rem .75rem;font-size:clamp(.875rem,.8rem + .35vw,1rem);cursor:pointer;transition:background var(--tr)}
 .post-opt:hover{background:var(--surface2)}
 .post-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
