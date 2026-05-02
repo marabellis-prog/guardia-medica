@@ -104,7 +104,10 @@ document.addEventListener('DOMContentLoaded',function(){
 
   if(btnAdd)btnAdd.addEventListener('click',initForm);
   if(btnSave)btnSave.addEventListener('click',salva);
-  if(selPost)selPost.addEventListener('change',showComuni);
+  if(selPost)selPost.addEventListener('change',function(){
+    if(this.value)this.style.outline='';
+    showComuni();
+  });
   if(btnNo)btnNo.addEventListener('click',function(){chiudi('mcnf');});
   if(btnSi)btnSi.addEventListener('click',confCompleta);
 
@@ -535,8 +538,11 @@ function salva(){
   var n=sanitizeText(document.getElementById('txn').value.trim());
   var p=document.getElementById('selPost').value;
   var ee=document.getElementById('errd'),te=document.getElementById('txd');
+  var sp=document.getElementById('selPost');
   if(!d){ee.style.display='block';te.classList.add('err');te.focus();return;}
   ee.style.display='none';te.classList.remove('err');
+  if(!p){sp.style.outline='2px solid var(--er)';sp.focus();fb(false,'Campo obbligatorio','Seleziona una postazione prima di salvare.');return;}
+  sp.style.outline='';
 
   var dtxt=document.getElementById('dtxt');
   var dtParts=(dtxt.innerText||'').trim().split(/\s+/);
