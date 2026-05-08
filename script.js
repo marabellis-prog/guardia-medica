@@ -412,9 +412,16 @@ function doSearch(opts){
   var dateTo=document.getElementById('srchDateTo').value;
   var post=document.getElementById('srchPost').value;
   if(!query&&!dateFrom&&!dateTo&&!post){
-    // In live-search vuoto = reset filtri (torna alla lista normale)
-    if(live&&currentFilters){clearSearch();return;}
-    if(!live)fb(false,'Attenzione','Inserisci almeno un criterio di ricerca.');
+    // In live-search vuoto: reset filtri ma TIENI APERTO il pannello
+    if(live){
+      if(currentFilters){
+        currentFilters=null;
+        (els.linfo||document.getElementById('linfo')).textContent='';
+        loadRows(1);
+      }
+      return;
+    }
+    fb(false,'Attenzione','Inserisci almeno un criterio di ricerca.');
     return;
   }
   var btn=document.getElementById('btnDoSearch');
