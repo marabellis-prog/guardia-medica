@@ -146,7 +146,7 @@ document.addEventListener('DOMContentLoaded',function(){
     if(el)el.addEventListener('keydown',function(e){if(e.key==='Enter')doSearch();});
   });
 
-  // Ricerca live con debounce 350ms (solo srchQuery)
+  // Ricerca live con debounce 350ms (solo srchQuery, NON chiude il pannello)
   var searchDebounceTimer=null;
   var sq=document.getElementById('srchQuery');
   if(sq){
@@ -154,7 +154,7 @@ document.addEventListener('DOMContentLoaded',function(){
       if(searchDebounceTimer)clearTimeout(searchDebounceTimer);
       var v=this.value.trim();
       if(v.length===0||v.length>=2){
-        searchDebounceTimer=setTimeout(function(){doSearch();},350);
+        searchDebounceTimer=setTimeout(function(){doSearch({live:true});},350);
       }
     });
   }
@@ -404,27 +404,36 @@ function showSortBadge(ok,msg){
 // RICERCA
 // ═══════════════════════════════════════════════════════════════════
 
-function doSearch(){
+function doSearch(opts){
+  opts=opts||{};
+  var live=!!opts.live; // se true, è chiamata da live-search (non chiude il pannello)
   var query=document.getElementById('srchQuery').value.trim();
   var dateFrom=document.getElementById('srchDateFrom').value;
   var dateTo=document.getElementById('srchDateTo').value;
   var post=document.getElementById('srchPost').value;
-  if(!query&&!dateFrom&&!dateTo&&!post){fb(false,'Attenzione','Inserisci almeno un criterio di ricerca.');return;}
+  if(!query&&!dateFrom&&!dateTo&&!post){
+    // In live-search vuoto = reset filtri (torna alla lista normale)
+    if(live&&currentFilters){clearSearch();return;}
+    if(!live)fb(false,'Attenzione','Inserisci almeno un criterio di ricerca.');
+    return;
+  }
   var btn=document.getElementById('btnDoSearch');
-  btn.disabled=true;btn.innerHTML='<div class="spin"></div> Ricerca…';
+  if(!live){btn.disabled=true;btn.innerHTML='<div class="spin"></div> Ricerca…';}
   currentFilters={query:query,dateFrom:dateFrom,dateTo:dateTo,postazione:post};
   searchChiamate(currentFilters).then(function(r){
-    btn.disabled=false;btn.innerHTML=svgSearch()+' Cerca';
-    document.getElementById('srchPanel').classList.remove('open');
-    document.getElementById('btnSearch').classList.remove('act');
+    if(!live){
+      btn.disabled=false;btn.innerHTML=svgSearch()+' Cerca';
+      document.getElementById('srchPanel').classList.remove('open');
+      document.getElementById('btnSearch').classList.remove('act');
+    }
     drawRows(r.records,query);
     var inf=r.total+' risultat'+(r.total===1?'o':'i');
-    document.getElementById('linfo').innerHTML=inf+' &nbsp;<span class="srch-active">Filtro attivo<svg onclick="clearSearch()" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
-    document.getElementById('pgn').innerHTML='';
+    (els.linfo||document.getElementById('linfo')).innerHTML=inf+' &nbsp;<span class="srch-active">Filtro attivo<svg onclick="clearSearch()" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></span>';
+    (els.pgn||document.getElementById('pgn')).innerHTML='';
   }).catch(function(err){
     if(err&&err.name==='AbortError')return; // richiesta superata
-    btn.disabled=false;btn.innerHTML=svgSearch()+' Cerca';
-    fb(false,'Errore','Server non raggiungibile.');
+    if(!live){btn.disabled=false;btn.innerHTML=svgSearch()+' Cerca';}
+    if(!live)fb(false,'Errore','Server non raggiungibile.');
   });
 }
 
