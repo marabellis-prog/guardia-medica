@@ -146,6 +146,35 @@ document.addEventListener('DOMContentLoaded',function(){
     if(el)el.addEventListener('keydown',function(e){if(e.key==='Enter')doSearch();});
   });
 
+  // Chip filtri rapidi
+  document.querySelectorAll('.qchip').forEach(function(chip){
+    chip.addEventListener('click',function(){
+      var active=this.classList.contains('act');
+      document.querySelectorAll('.qchip').forEach(function(c){c.classList.remove('act');});
+      if(active){
+        // toggle off → reset filtri data
+        document.getElementById('srchDateFrom').value='';
+        document.getElementById('srchDateTo').value='';
+        doSearch({live:true});
+        return;
+      }
+      this.classList.add('act');
+      var range=this.dataset.range;
+      var now=new Date();
+      var from=new Date(now),to=new Date(now);
+      to.setHours(23,59,59,999);
+      if(range==='today'){from.setHours(0,0,0,0);}
+      else if(range==='7d'){from.setDate(now.getDate()-6);from.setHours(0,0,0,0);}
+      else if(range==='30d'){from.setDate(now.getDate()-29);from.setHours(0,0,0,0);}
+      else if(range==='thisMonth'){from=new Date(now.getFullYear(),now.getMonth(),1,0,0,0);}
+      else if(range==='thisYear'){from=new Date(now.getFullYear(),0,1,0,0,0);}
+      var fmt=function(d){var p=function(n){return String(n).padStart(2,'0');};return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate());};
+      document.getElementById('srchDateFrom').value=fmt(from);
+      document.getElementById('srchDateTo').value=fmt(to);
+      doSearch({live:true});
+    });
+  });
+
   // Ricerca live con debounce 350ms (solo srchQuery, NON chiude il pannello)
   var searchDebounceTimer=null;
   var sq=document.getElementById('srchQuery');
@@ -226,6 +255,21 @@ document.addEventListener('DOMContentLoaded',function(){
   if(btnPostSave)btnPostSave.addEventListener('click',salvaPostazioni);
   if(btnPostDelCancel)btnPostDelCancel.addEventListener('click',function(){chiudi('mpostDel');});
   if(btnPostDelConfirm)btnPostDelConfirm.addEventListener('click',confermaEliminaPostazione);
+
+  // Modal chiamata
+  var btnPhoneCancel=document.getElementById('btnPhoneCancel');
+  var btnPhoneClear=document.getElementById('btnPhoneClear');
+  var btnPhoneAnon=document.getElementById('btnPhoneAnon');
+  if(btnPhoneCancel)btnPhoneCancel.addEventListener('click',function(){chiudi('mphone');});
+  if(btnPhoneClear)btnPhoneClear.addEventListener('click',function(){
+    chiudi('mphone');
+    window.location.href='tel:'+phoneModalNumber;
+  });
+  if(btnPhoneAnon)btnPhoneAnon.addEventListener('click',function(){
+    chiudi('mphone');
+    // Codifico #31# come %2331%23 (compatibile iOS/Android)
+    window.location.href='tel:%2331%23'+phoneModalNumber;
+  });
 
   // Delete chiamata
   var btnDelCancel=document.getElementById('btnDelCancel');
@@ -504,6 +548,7 @@ function resetSearchUI(){
   document.getElementById('srchPost').value='';
   document.getElementById('srchPanel').classList.remove('open');
   document.getElementById('btnSearch').classList.remove('act');
+  document.querySelectorAll('.qchip.act').forEach(function(c){c.classList.remove('act');});
 }
 
 
@@ -752,8 +797,8 @@ function drawRows(recs,highlightQuery){
       return '<div class="post-opt" data-nome="'+esc(p.nome)+'" data-colore="'+esc(p.colore||'#2e7d5e')+'">'
         +'<span class="post-dot" style="background:'+esc(p.colore||'#2e7d5e')+'"></span>'+esc(p.nome)+'</div>';
     }).join('');
-    var descHtml=highlightQuery?highlight(r.descrizione||'',highlightQuery):esc(r.descrizione||'');
-    var noteHtml=highlightQuery?highlight(r.note||'',highlightQuery):esc(r.note||'');
+    var descHtml=linkifyPhones(highlightQuery?highlight(r.descrizione||'',highlightQuery):esc(r.descrizione||''));
+    var noteHtml=linkifyPhones(highlightQuery?highlight(r.note||'',highlightQuery):esc(r.note||''));
     var si=r.completato
       ?'<div class="ich"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>'
       :'<div class="iho" data-row="'+r.id+'"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg></div>';
@@ -781,6 +826,56 @@ function drawRows(recs,highlightQuery){
 }
 
 // ───────────────────────────────────────────────────────────
+// AUTOSAVE: timer per riga, parte 1.5s dopo che il focus
+// lascia la riga. Cancellato se l'utente torna sulla riga.
+// ───────────────────────────────────────────────────────────
+var autosaveTimers={};
+var AUTOSAVE_DELAY=1500;
+
+function scheduleAutosave(tr){
+  if(!tr||!tr.dataset)return;
+  var rowId=tr.dataset.row;
+  if(!rowId)return;
+  if(autosaveTimers[rowId])clearTimeout(autosaveTimers[rowId]);
+  autosaveTimers[rowId]=setTimeout(function(){
+    delete autosaveTimers[rowId];
+    if(!document.body.contains(tr))return;
+    if(!dirtyMap[rowId])return;
+    if(tr.contains(document.activeElement))return; // utente è tornato
+    silentAutoSave(tr,rowId);
+  },AUTOSAVE_DELAY);
+}
+
+function cancelAutosave(rowId){
+  if(autosaveTimers[rowId]){clearTimeout(autosaveTimers[rowId]);delete autosaveTimers[rowId];}
+}
+
+function silentAutoSave(tr,rowId){
+  if(!validateDateTimeFields(tr))return; // se data/ora invalida, già mostra warning
+  var po=tr.querySelector('[data-field="postazione"]')?tr.querySelector('[data-field="postazione"]').dataset.nome||'':'';
+  var de=sanitizeText((tr.querySelector('[data-field="descrizione"]')||{innerText:''}).innerText.trim());
+  var no=sanitizeText((tr.querySelector('[data-field="note"]')||{innerText:''}).innerText.trim());
+  var tsNow=getFormattedTs(tr);
+  var body={postazione:po,descrizione:de,note:no};
+  var tsISO=italianToISO(tsNow);if(tsISO)body.timestamp_chiamata=tsISO;
+  var floppy=tr.querySelector('.isv');
+  if(floppy){floppy.style.display='flex';floppy.classList.add('saving');floppy.innerHTML='<div class="spin-dark"></div>';}
+  sbFetch('chiamate?id=eq.'+rowId,{method:'PATCH',body:body,prefer:'return=minimal'}).then(function(res){
+    if(floppy){floppy.classList.remove('saving');floppy.innerHTML=svgFloppy();}
+    if(res.ok){
+      delete dirtyMap[rowId];
+      tr.dataset.originalTs=tsNow;
+      if(floppy)floppy.style.display='none';
+      // Pulse verde discreto come feedback visivo
+      tr.classList.add('saved-pulse');
+      setTimeout(function(){tr.classList.remove('saved-pulse');},900);
+    }
+  }).catch(function(){
+    if(floppy){floppy.classList.remove('saving');floppy.innerHTML=svgFloppy();}
+  });
+}
+
+// ───────────────────────────────────────────────────────────
 // EVENT DELEGATION sul <tbody>: 1 listener per tipo, valido per
 // qualsiasi riga (presente o futura). Sostituisce le 6 forEach
 // che giravano in drawRows ad ogni redraw.
@@ -792,6 +887,8 @@ function setupTableDelegation(){
 
   tbody.addEventListener('click',function(e){
     var t=e.target;
+    var ph=t.closest('.ph-link');
+    if(ph){e.stopPropagation();e.preventDefault();openPhoneModal(ph.dataset.phone);return;}
     var iho=t.closest('.iho');
     if(iho){startCompleta(iho.closest('tr'),parseInt(iho.dataset.row));return;}
 
@@ -895,28 +992,36 @@ function setupTableDelegation(){
     }
   });
 
-  // FOCUSIN su date/time → seleziona tutto
+  // FOCUSIN su date/time → seleziona tutto + cancella autosave pending
   tbody.addEventListener('focusin',function(e){
     var el=e.target;
     if(!el.classList)return;
+    var tr=el.closest('tr');
+    if(tr&&tr.dataset.row)cancelAutosave(tr.dataset.row);
     if(el.classList.contains('dt-date')||el.classList.contains('dt-time')){
       var range=document.createRange();range.selectNodeContents(el);
       var sel=window.getSelection();sel.removeAllRanges();sel.addRange(range);
     }
   });
 
-  // FOCUSOUT su date/time → autoformatta + valida
+  // FOCUSOUT: 1) autoformatta date/time se necessario, 2) pianifica autosave
   tbody.addEventListener('focusout',function(e){
     var el=e.target;
     if(!el.classList)return;
+    var tr=el.closest('tr');
     var isDate=el.classList.contains('dt-date');
     var isTime=el.classList.contains('dt-time');
-    if(!isDate&&!isTime)return;
-    var raw=(el.innerText||'').trim();if(!raw)return;
-    var fmt=isDate?autoformatDate(raw):autoformatTime(raw);
-    if(fmt){el.innerText=fmt;setFieldError(el,false);}
-    else{setFieldError(el,isDate?!isValidDate(raw):!isValidTime(raw));}
-    var tr=el.closest('tr');if(tr)markDirty(tr);
+    if(isDate||isTime){
+      var raw=(el.innerText||'').trim();
+      if(raw){
+        var fmt=isDate?autoformatDate(raw):autoformatTime(raw);
+        if(fmt){el.innerText=fmt;setFieldError(el,false);}
+        else{setFieldError(el,isDate?!isValidDate(raw):!isValidTime(raw));}
+        if(tr)markDirty(tr);
+      }
+    }
+    // Pianifica autosave se la riga è dirty
+    if(tr&&tr.dataset.row&&dirtyMap[tr.dataset.row])scheduleAutosave(tr);
   });
 }
 
@@ -1347,6 +1452,7 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mdel'))chiudi('mdel');
   if(e.target===document.getElementById('mpost'))chiudi('mpost');
   if(e.target===document.getElementById('mpostDel'))chiudi('mpostDel');
+  if(e.target===document.getElementById('mphone'))chiudi('mphone');
 });
 
 
@@ -1447,3 +1553,31 @@ function svgHourglass(){return '<svg width="16" height="16" viewBox="0 0 24 24" 
 function svgSearch(){return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>';}
 function svgTrash(){return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ───────────────────────────────────────────────────────────
+// CLICK-TO-CALL: trasforma numeri di telefono in link
+// Riconosce mobile (3xx) e fissi (0xx), opz. con prefisso +39
+// ───────────────────────────────────────────────────────────
+function linkifyPhones(html){
+  var re=/(\+?39[\s.\-]?)?(\d[\d\s.\-]{7,14}\d)/g;
+  return html.replace(re,function(match){
+    var digits=match.replace(/\D/g,'');
+    if(digits.length<9||digits.length>12)return match;
+    if(!/^(39)?[03]/.test(digits))return match;
+    return '<span class="ph-link" contenteditable="false" data-phone="'+digits+'" title="Tocca per chiamare">'+match+'</span>';
+  });
+}
+
+function fmtPhoneDisplay(digits){
+  if(digits.length===10)return digits.substring(0,3)+' '+digits.substring(3,6)+' '+digits.substring(6);
+  if(digits.length===12&&digits.indexOf('39')===0)return '+39 '+digits.substring(2,5)+' '+digits.substring(5,8)+' '+digits.substring(8);
+  return digits;
+}
+
+var phoneModalNumber='';
+function openPhoneModal(num){
+  phoneModalNumber=num;
+  var el=document.getElementById('mphoneNum');
+  if(el)el.textContent=fmtPhoneDisplay(num);
+  apri('mphone');
+}
