@@ -184,6 +184,24 @@ mark{background:#fff176;color:inherit;border-radius:2px;padding:0 1px}
 .inp{height:34px;padding:0 .6rem;border:1px solid var(--bord);border-radius:var(--r2);background:var(--surface2);color:var(--tx);font-size:clamp(.875rem,.8rem + .35vw,1rem);width:100%;transition:border-color var(--tr),box-shadow var(--tr)}
 .inp:focus{border-color:var(--pr);box-shadow:0 0 0 3px rgba(46,125,94,.15);outline:none}
 
+/* Feedback visivo autosave: bordo verde sinistro che svanisce */
+@keyframes savedPulse{
+  0%{box-shadow:inset 4px 0 0 0 var(--ok)}
+  100%{box-shadow:inset 0 0 0 0 var(--ok)}
+}
+tbody tr.saved-pulse{animation:savedPulse 900ms ease-out}
+
+/* Chip filtri rapidi nel pannello ricerca */
+.qchip{display:inline-flex;align-items:center;gap:.35rem;height:32px;padding:0 .9rem;border:1px solid var(--bord);border-radius:99px;background:var(--surface2);color:var(--txm);font-size:clamp(.75rem,.7rem + .25vw,.875rem);font-weight:600;cursor:pointer;transition:all var(--tr);white-space:nowrap}
+.qchip:hover{background:var(--surfoff);color:var(--tx);border-color:var(--txm)}
+.qchip.act{background:var(--pr);color:#fff;border-color:var(--pr);box-shadow:0 1px 4px rgba(46,125,94,.25)}
+
+/* Link telefonico cliccabile dentro descrizione/note */
+.ph-link{display:inline-block;color:var(--pr);background:var(--prl);border-radius:5px;padding:0 6px;margin:0 1px;cursor:pointer;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:.2px;text-decoration:underline;text-decoration-color:rgba(46,125,94,.35);text-decoration-thickness:1.5px;text-underline-offset:3px;white-space:nowrap;transition:background var(--tr),color var(--tr),transform var(--tr);user-select:text}
+.ph-link::before{content:"\260E\00a0";font-size:.85em;opacity:.85;text-decoration:none}
+.ph-link:hover{background:var(--pr);color:#fff;text-decoration-color:rgba(255,255,255,.5);transform:translateY(-1px)}
+.ph-link:active{transform:translateY(0)}
+
 /* ═══════════════════════════════════════
    MOBILE — card layout (≤ 640px)
 ═══════════════════════════════════════ */
