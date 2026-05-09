@@ -230,6 +230,10 @@ async function setupAuth(){
   loadPost();
   setupAutoRefresh();
   setupVersionWatcher();
+  // Operazioni autenticate (post-JWT)
+  syncProcess();
+  autoPurgeOld();
+  refreshTrashBadge();
 }
 
 async function authSignInWithGoogle(){
@@ -1176,13 +1180,10 @@ document.addEventListener('DOMContentLoaded',function(){
     });
   });
 
-  // Al boot: prova subito a smaltire la coda + mostra badge se necessario
+  // Badge "in coda di sync" è basato su localStorage, non richiede auth
   syncRenderBadge();
-  syncProcess();
-
-  // Auto-purge cestino > 30gg + aggiorna badge cestino
-  autoPurgeOld();
-  refreshTrashBadge();
+  // Le altre operazioni (syncProcess, autoPurgeOld, refreshTrashBadge)
+  // richiedono JWT e vengono lanciate dentro setupAuth dopo il login.
 });
 
 
