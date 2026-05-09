@@ -199,8 +199,9 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
 
 /* Header: contenitore azioni + pulsante cestino */
 .hactions{display:flex;align-items:center;gap:.4rem}
-.hbtn-trash{display:inline-flex;align-items:center;gap:.4rem;height:36px;padding:0 .8rem;border-radius:var(--r2);background:transparent;color:var(--txm);font-size:.85rem;font-weight:500;transition:background var(--tr),color var(--tr);position:relative}
-.hbtn-trash:hover{background:var(--surface2);color:var(--tx)}
+.hbtn-trash{display:inline-flex;align-items:center;gap:.4rem;height:36px;padding:0 .85rem;border-radius:var(--r2);background:transparent;color:var(--pr);border:1px solid var(--pr);font-size:.85rem;font-weight:600;transition:background var(--tr),color var(--tr),border-color var(--tr),box-shadow var(--tr);position:relative}
+.hbtn-trash:hover{background:var(--prl);color:var(--prh);border-color:var(--prh);box-shadow:0 1px 4px rgba(46,125,94,.15)}
+.hbtn-trash:active{transform:scale(.97)}
 .hbtn-label{font-size:.85rem;font-weight:500}
 .hbtn-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:var(--er);color:#fff;border-radius:99px;font-size:.7rem;font-weight:700;margin-left:.1rem}
 @media(max-width:560px){
