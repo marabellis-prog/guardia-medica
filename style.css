@@ -191,6 +191,30 @@ mark{background:#fff176;color:inherit;border-radius:2px;padding:0 1px}
 }
 tbody tr.saved-pulse{animation:savedPulse 900ms ease-out}
 
+/* Riga in attesa di sincronizzazione (offline o errore di rete) */
+tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
+@media(max-width:640px){
+  .twrap tbody tr.pending-sync{box-shadow:inset 0 0 0 1px var(--wa,#d4a017),inset 4px 0 0 0 var(--wa,#d4a017)}
+}
+
+/* Badge fluttuante: modifiche in attesa di sincronizzazione */
+.sync-badge{
+  position:fixed;bottom:16px;right:16px;z-index:9000;
+  display:flex;align-items:center;gap:.5rem;
+  padding:.65rem 1rem;
+  background:var(--wabg,#fef9e7);color:var(--wa,#b07a00);
+  border:1px solid var(--wabr,#f5e390);
+  border-radius:99px;
+  font-size:.85rem;font-weight:600;
+  box-shadow:var(--sh2);
+  cursor:pointer;
+  transition:transform var(--tr),box-shadow var(--tr);
+  animation:syncFadeIn .25s ease-out;
+}
+.sync-badge:hover{transform:translateY(-2px);box-shadow:var(--sh3)}
+.sync-badge.offline{background:var(--erbg);color:var(--er);border-color:var(--er)}
+@keyframes syncFadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
 /* Chip filtri rapidi nel pannello ricerca */
 .qchip{display:inline-flex;align-items:center;gap:.35rem;height:32px;padding:0 .9rem;border:1px solid var(--bord);border-radius:99px;background:var(--surface2);color:var(--txm);font-size:clamp(.75rem,.7rem + .25vw,.875rem);font-weight:600;cursor:pointer;transition:all var(--tr);white-space:nowrap}
 .qchip:hover{background:var(--surfoff);color:var(--tx);border-color:var(--txm)}
