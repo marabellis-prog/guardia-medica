@@ -197,6 +197,34 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
   .twrap tbody tr.pending-sync{box-shadow:inset 0 0 0 1px var(--wa,#d4a017),inset 4px 0 0 0 var(--wa,#d4a017)}
 }
 
+/* Header: contenitore azioni + pulsante cestino */
+.hactions{display:flex;align-items:center;gap:.4rem}
+.hbtn-trash{display:inline-flex;align-items:center;gap:.4rem;height:36px;padding:0 .8rem;border-radius:var(--r2);background:transparent;color:var(--txm);font-size:.85rem;font-weight:500;transition:background var(--tr),color var(--tr);position:relative}
+.hbtn-trash:hover{background:var(--surface2);color:var(--tx)}
+.hbtn-label{font-size:.85rem;font-weight:500}
+.hbtn-badge{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;background:var(--er);color:#fff;border-radius:99px;font-size:.7rem;font-weight:700;margin-left:.1rem}
+@media(max-width:560px){
+  .hbtn-trash{padding:0;width:36px;justify-content:center}
+  .hbtn-label{display:none}
+  .hbtn-badge{position:absolute;top:-3px;right:-3px;margin:0;border:2px solid var(--surface)}
+}
+
+/* Modal Cestino: lista record */
+.trash-row{padding:.85rem 1rem;border-bottom:1px solid var(--div);transition:background var(--tr)}
+.trash-row:last-child{border-bottom:none}
+.trash-row:hover{background:var(--surface)}
+.trash-row-head{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.35rem}
+.trash-ts{font-weight:600;font-size:.85rem;font-variant-numeric:tabular-nums;color:var(--tx)}
+.trash-days{font-size:.7rem;color:var(--txm);margin-left:auto;font-weight:600;background:var(--surfoff);padding:2px 8px;border-radius:99px}
+.trash-days.trash-warn{background:var(--erbg);color:var(--er)}
+.trash-desc{font-size:.85rem;color:var(--txm);line-height:1.5;margin:.2rem 0 .55rem;white-space:pre-wrap;word-break:break-word}
+.trash-actions{display:flex;gap:.5rem;flex-wrap:wrap}
+.trash-btn-restore,.trash-btn-delete{display:inline-flex;align-items:center;gap:.3rem;height:30px;padding:0 .8rem;border-radius:var(--r2);font-size:.78rem;font-weight:600;cursor:pointer;transition:all var(--tr);border:1px solid transparent}
+.trash-btn-restore{background:var(--prl);color:var(--pr)}
+.trash-btn-restore:hover{background:var(--pr);color:#fff}
+.trash-btn-delete{background:var(--erbg);color:var(--er)}
+.trash-btn-delete:hover{background:var(--er);color:#fff}
+
 /* Banner Annulla eliminazione: appare 7s dopo delete */
 .undo-banner{
   position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9100;
