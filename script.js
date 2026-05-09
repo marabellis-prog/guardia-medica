@@ -1,6 +1,6 @@
 // ─── BUILD VERSION (auto-aggiornato dallo script di deploy) ───
 // NON modificare manualmente: il deploy aggiorna questa stringa
-var BUILD_VERSION = '1778339861744';
+var BUILD_VERSION = '1778341017866';
 
 var POST=[],PAGE=1,PROW=null,DROW=null,DELEL=null;
 var dirtyMap={};
@@ -113,6 +113,12 @@ var refreshPollTimer=null;
 var realtimeChannel=null;
 var realtimeDebounceTimer=null;
 var REALTIME_DEBOUNCE_MS=500;
+// Soppressione "echo": ignora gli eventi realtime nei 3s successivi
+// a una nostra scrittura (POST/PATCH/DELETE) per non auto-notificarci
+var lastOwnWriteAt=0;
+var OWN_WRITE_SUPPRESSION_MS=3000;
+function markOwnWrite(){lastOwnWriteAt=Date.now();}
+function isWithinOwnWriteWindow(){return (Date.now()-lastOwnWriteAt)<OWN_WRITE_SUPPRESSION_MS;}
 
 function fetchLatestUpdate(){
   return fetch(SUPABASE_URL+'/rest/v1/chiamate?select=updated_at&order=updated_at.desc&limit=1',{
@@ -226,6 +232,8 @@ function setupRealtime(){
     .then(function(client){
       realtimeChannel=client.channel('chiamate-realtime')
         .on('postgres_changes',{event:'*',schema:'public',table:'chiamate'},function(payload){
+          // Skip "echo": eventi causati dalle nostre stesse scritture
+          if(isWithinOwnWriteWindow())return;
           // Push event ricevuto → trigger refresh con debounce
           scheduleRefreshFromRemote();
         })
@@ -1185,6 +1193,7 @@ function salva(){
 
   saveAllDirtySilent(function(){
     var tsISO=italianToISO(fmtD+' '+fmtT)||new Date().toISOString();
+    markOwnWrite();
     sbFetch('chiamate',{
       method:'POST',
       body:{timestamp_chiamata:tsISO,postazione:p||'',descrizione:d,note:n||'',completato:false},
@@ -1340,6 +1349,7 @@ function syncProcess(){
   var q=syncLoadQueue();
   if(!q.length)return;
   // Processa in parallelo
+  markOwnWrite();
   Promise.all(q.map(function(entry){
     entry.attempts=(entry.attempts||0)+1;
     return sbFetch('chiamate?id=eq.'+entry.id,{
@@ -1448,6 +1458,7 @@ function silentAutoSave(tr,rowId){
   // Se offline, accoda subito senza tentare
   if(typeof navigator!=='undefined'&&navigator.onLine===false){onFailure();return;}
 
+  markOwnWrite();
   sbFetch('chiamate?id=eq.'+rowId,{method:'PATCH',body:body,prefer:'return=minimal'})
     .then(function(res){if(res.ok)onSuccess();else onFailure();})
     .catch(function(){onFailure();});
@@ -1701,6 +1712,7 @@ function saveEdit(info,floppyEl,onDone){
 
   if(typeof navigator!=='undefined'&&navigator.onLine===false){queueAndConfirm();return;}
 
+  markOwnWrite();
   sbFetch('chiamate?id=eq.'+ri,{method:'PATCH',body:body,prefer:'return=minimal'}).then(function(res){
     if(floppyEl){floppyEl.classList.remove('saving');floppyEl.innerHTML=svgFloppy();}
     if(res.ok){
@@ -1730,6 +1742,7 @@ function saveAllDirty(cb,opts){
   var silent=!!opts.silent;
   var keys=Object.keys(dirtyMap);
   if(!keys.length){if(cb)silent?cb():cb(0,0);return;}
+  markOwnWrite();
   var promises=keys.map(function(k){
     var info=dirtyMap[k],tr=info.tr,ri=info.rowIndex;
     var po=tr.querySelector('[data-field="postazione"]')?tr.querySelector('[data-field="postazione"]').dataset.nome||'':'';
@@ -1777,6 +1790,7 @@ function confCompleta(){
   if(!validateDateTimeFields(tr))return;
   var body={postazione:po,descrizione:de,note:no,completato:true};
   var tsISO=italianToISO(tsNow);if(tsISO)body.timestamp_chiamata=tsISO;
+  markOwnWrite();
   sbFetch('chiamate?id=eq.'+ri,{method:'PATCH',body:body,prefer:'return=minimal'}).then(function(res){
     PROW=null;
     if(res.ok){
@@ -1834,6 +1848,7 @@ function confDelete(){
     return;
   }
 
+  markOwnWrite();
   sbFetch('chiamate?id=eq.'+ri,{method:'PATCH',body:body,prefer:'return=minimal'}).then(function(res){
     if(!res.ok)syncEnqueue(String(ri),body);
     else refreshTrashBadge();
@@ -1943,6 +1958,7 @@ function trashRestoreOne(id,rowEl){
     return;
   }
   rowEl.style.opacity='.5';rowEl.style.pointerEvents='none';
+  markOwnWrite();
   sbFetch('chiamate?id=eq.'+id,{method:'PATCH',body:{deleted_at:null},prefer:'return=minimal'}).then(function(res){
     if(res.ok){
       rowEl.style.transition='opacity .25s,transform .25s';
@@ -1971,6 +1987,7 @@ function trashHardDeleteOne(id,rowEl){
     return;
   }
   rowEl.style.opacity='.5';rowEl.style.pointerEvents='none';
+  markOwnWrite();
   sbFetch('chiamate?id=eq.'+id,{method:'DELETE'}).then(function(res){
     if(res.ok){
       rowEl.style.transition='opacity .25s,transform .25s';
@@ -1998,6 +2015,7 @@ function trashEmptyAll(){
   }
   var btn=document.getElementById('btnTrashEmptyConfirm');
   if(btn){btn.disabled=true;btn.innerHTML='<div class="spin"></div> Svuoto…';}
+  markOwnWrite();
   sbFetch('chiamate?deleted_at=not.is.null',{method:'DELETE'}).then(function(res){
     chiudi('mtrashEmpty');
     if(btn){btn.disabled=false;btn.innerHTML='Svuota';}
@@ -2025,6 +2043,7 @@ function autoPurgeOld(){
   localStorage.setItem(lastKey,String(now));
   if(typeof navigator!=='undefined'&&navigator.onLine===false)return;
   var cutoff=new Date(now-TRASH_RETENTION_DAYS*86400000).toISOString();
+  markOwnWrite();
   sbFetch('chiamate?deleted_at=lt.'+cutoff,{method:'DELETE'}).then(function(){}).catch(function(){});
 }
 
@@ -2060,6 +2079,7 @@ function showUndoBanner(rowId){
       loadRows(PAGE);
       return;
     }
+    markOwnWrite();
     sbFetch('chiamate?id=eq.'+rowId,{method:'PATCH',body:restoreBody,prefer:'return=minimal'}).then(function(res){
       if(res.ok){fb(true,'Ripristinata','Chiamata ripristinata.');loadRows(PAGE);}
       else{syncEnqueue(String(rowId),restoreBody);loadRows(PAGE);}
@@ -2264,6 +2284,7 @@ function doSalvaPostazioni(dati){
       });
   })).then(function(){
     // STEP 2 — rinomina + elimina + upsert TUTTI in parallelo
+    if(Object.keys(renameMap).length>0||trulyDeleted.length>0)markOwnWrite();
     var ops=[];
     Object.keys(renameMap).forEach(function(oldN){
       ops.push(sbFetch('chiamate?postazione=eq.'+encodeURIComponent(oldN),{
