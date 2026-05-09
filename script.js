@@ -97,6 +97,63 @@ function hideLoader(){
 // ═══════════════════════════════════════════════════════════════════
 
 // ───────────────────────────────────────────────────────────
+// SERVICE WORKER + SHORTCUT URL HANDLER
+// ───────────────────────────────────────────────────────────
+function registerServiceWorker(){
+  if(!('serviceWorker' in navigator))return;
+  // Differisce la registrazione: non bloccare il primo render
+  window.addEventListener('load',function(){
+    navigator.serviceWorker.register('./sw.js').then(function(reg){
+      // Quando il SW viene aggiornato, mostra un piccolo banner
+      if(reg.waiting){showUpdateAvailable(reg);return;}
+      reg.addEventListener('updatefound',function(){
+        var nw=reg.installing;
+        if(!nw)return;
+        nw.addEventListener('statechange',function(){
+          if(nw.state==='installed'&&navigator.serviceWorker.controller){
+            showUpdateAvailable(reg);
+          }
+        });
+      });
+    }).catch(function(){/* SW non critico, l'app funziona comunque */});
+  });
+}
+
+function showUpdateAvailable(reg){
+  if(document.getElementById('updateBanner'))return;
+  var b=document.createElement('div');
+  b.id='updateBanner';
+  b.className='update-banner';
+  b.innerHTML='<span>Nuova versione disponibile</span><button type="button">Aggiorna</button>';
+  b.querySelector('button').addEventListener('click',function(){
+    if(reg&&reg.waiting)reg.waiting.postMessage({type:'SKIP_WAITING'});
+    setTimeout(function(){window.location.reload();},150);
+  });
+  document.body.appendChild(b);
+}
+
+// Gestisce ?action=new / ?action=trash dai shortcut PWA
+function handleShortcutAction(){
+  try{
+    var params=new URLSearchParams(window.location.search);
+    var action=params.get('action');
+    if(!action)return;
+    setTimeout(function(){
+      if(action==='new'){
+        var btn=document.getElementById('btnAdd');if(btn)btn.click();
+        var txd=document.getElementById('txd');if(txd)txd.focus();
+      } else if(action==='trash'){
+        var btn=document.getElementById('btnTrashOpen');if(btn)btn.click();
+      }
+    },350);
+    // Pulisci la URL così un refresh non riapre lo shortcut
+    if(window.history&&window.history.replaceState){
+      window.history.replaceState({},'',window.location.pathname);
+    }
+  }catch(e){}
+}
+
+// ───────────────────────────────────────────────────────────
 // LINK ESTERNI rapidi (Tessera Sanitaria, Prescrittori Lazio)
 // Riutilizza la finestra/tab esistente se ancora aperta,
 // così non ricarica la sessione di login.
@@ -129,6 +186,8 @@ document.addEventListener('DOMContentLoaded',function(){
   initEls();
   setupTableDelegation();
   setupQuickLinks();
+  registerServiceWorker();
+  handleShortcutAction();
   loadPost();
 
   var btnAdd=document.getElementById('btnAdd');
