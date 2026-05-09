@@ -267,7 +267,8 @@ async function adminLoadUsers(){
   wrap.innerHTML = '<div style="padding:2rem;text-align:center"><div class="spin" style="margin:0 auto;border-color:rgba(46,125,94,.25);border-top-color:var(--pr);width:24px;height:24px"></div></div>';
   try {
     var client = await getSupabaseClient();
-    var res = await client.from('users_whitelist').select('id,email,full_name,role,protected,created_at').order('protected', { ascending: false }).order('full_name');
+    // Uso RPC SECURITY DEFINER (bypassa RLS, niente ricorsione possibile)
+    var res = await client.rpc('admin_list_users');
     if(res.error) throw res.error;
     var users = res.data || [];
     if(!users.length){
@@ -316,10 +317,11 @@ async function adminConfirmAddUser(){
   btn.disabled = true; btn.textContent = 'Aggiungo…';
   try {
     var client = await getSupabaseClient();
-    var res = await client.from('users_whitelist').insert([{ email: email, full_name: name, role: role }]);
+    var res = await client.rpc('admin_add_user', { p_email: email, p_full_name: name, p_role: role });
     btn.disabled = false; btn.textContent = 'Aggiungi';
     if(res.error){
-      if(res.error.code==='23505') showErr('Esiste già un utente con questa email.');
+      if((res.error.message||'').indexOf('duplicate')!==-1||res.error.code==='23505')
+        showErr('Esiste già un utente con questa email.');
       else showErr('Errore: '+res.error.message);
       return;
     }
@@ -352,9 +354,15 @@ async function adminConfirmDelete(){
   btn.disabled = true; btn.textContent = 'Elimino…';
   try {
     var client = await getSupabaseClient();
-    var res = await client.from('users_whitelist').delete().eq('id', u.id);
+    var res = await client.rpc('admin_delete_user', { p_id: u.id });
     btn.disabled = false; btn.textContent = 'Elimina';
-    if(res.error){ fb(false,'Errore', res.error.message); return; }
+    if(res.error){
+      var m = res.error.message || '';
+      if(m.indexOf('protected_user')!==-1) fb(false,'Errore','Utente protetto, non eliminabile.');
+      else if(m.indexOf('not_admin')!==-1) fb(false,'Errore','Solo gli admin possono eliminare utenti.');
+      else fb(false,'Errore', m);
+      return;
+    }
     chiudi('madminDel');
     fb(true,'Eliminato', u.full_name+' e tutti i suoi dati sono stati rimossi.');
     adminUserToDelete = null;
