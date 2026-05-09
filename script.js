@@ -327,28 +327,11 @@ async function adminConfirmAddUser(){
   }
 }
 
-async function adminPromptDelete(userId, userEmail, userName){
-  // Conta chiamate dell'utente per messaggio
-  var count = '?';
-  try {
-    var client = await getSupabaseClient();
-    // Trova l'auth.users.id dato l'email
-    var authRes = await fetch(SUPABASE_URL+'/rest/v1/rpc/get_user_chiamate_count',{
-      method:'POST',
-      headers:{
-        'apikey':SUPABASE_ANON_KEY,
-        'Authorization':'Bearer '+(await client.auth.getSession()).data.session.access_token,
-        'Content-Type':'application/json'
-      },
-      body: JSON.stringify({ target_email: userEmail })
-    });
-    if(authRes.ok){ var n = await authRes.json(); count = n; }
-  } catch(_){}
-
+function adminPromptDelete(userId, userEmail, userName){
   adminUserToDelete = { id: userId, email: userEmail, full_name: userName };
   var msg = 'Stai per eliminare <b>'+esc(userName)+'</b> ('+esc(userEmail)+')<br><br>'
-    + (count!=='?'?'Verranno eliminate <b>'+count+' chiamate</b> (anche dal cestino).':'')
-    + '<br><b style="color:var(--er)">Operazione irreversibile.</b>';
+    + 'Verranno cancellate <b>tutte le sue chiamate</b> (anche quelle nel cestino) e l\'account verrà rimosso.'
+    + '<br><br><b style="color:var(--er)">Operazione irreversibile.</b>';
   document.getElementById('madminDelMsg').innerHTML = msg;
   document.getElementById('adminDelConfirmInput').value = '';
   var bc = document.getElementById('btnAdminDelConfirm');
