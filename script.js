@@ -1046,10 +1046,26 @@ function setupTableDelegation(){
   if(!tbody||tbody._delegated)return;
   tbody._delegated=true;
 
+  // Mobile: previene il focus sul contenteditable padre quando si tocca un .ph-link
+  // (altrimenti la tastiera si apre prima del modal)
+  var phPreventFocus=function(e){
+    if(e.target&&e.target.closest&&e.target.closest('.ph-link'))e.preventDefault();
+  };
+  tbody.addEventListener('pointerdown',phPreventFocus);
+  tbody.addEventListener('mousedown',phPreventFocus);
+
   tbody.addEventListener('click',function(e){
     var t=e.target;
     var ph=t.closest('.ph-link');
-    if(ph){e.stopPropagation();e.preventDefault();openPhoneModal(ph.dataset.phone);return;}
+    if(ph){
+      e.stopPropagation();e.preventDefault();
+      // Doppio scudo: blur subito qualunque cosa sia focalizzata
+      if(document.activeElement&&typeof document.activeElement.blur==='function'){
+        try{document.activeElement.blur();}catch(_e){}
+      }
+      openPhoneModal(ph.dataset.phone);
+      return;
+    }
     var iho=t.closest('.iho');
     if(iho){startCompleta(iho.closest('tr'),parseInt(iho.dataset.row));return;}
 
@@ -2240,6 +2256,11 @@ function fmtPhoneDisplay(digits){
 
 var phoneModalNumber='';
 function openPhoneModal(num){
+  // Forza blur dell'elemento attivo per chiudere la tastiera mobile
+  // (se è stata aperta dal focus al contenteditable padre)
+  if(document.activeElement&&typeof document.activeElement.blur==='function'){
+    try{document.activeElement.blur();}catch(e){}
+  }
   phoneModalNumber=num;
   var el=document.getElementById('mphoneNum');
   if(el)el.textContent=fmtPhoneDisplay(num);
