@@ -253,6 +253,61 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
   .export-grid{grid-template-columns:1fr !important}
 }
 
+/* ═══════════════════════════════════════════
+   AUTH: schermata login + user menu + admin
+═══════════════════════════════════════════ */
+.auth-overlay{position:fixed;inset:0;z-index:99998;background:var(--bg,#161510);display:flex;align-items:center;justify-content:center;padding:1.5rem;animation:authFadeIn .2s ease-out}
+@keyframes authFadeIn{from{opacity:0}to{opacity:1}}
+.auth-card{background:var(--surface);border:1px solid var(--bord);border-radius:18px;box-shadow:var(--sh3);padding:2.5rem 2rem;width:100%;max-width:380px;text-align:center}
+.auth-logo{display:flex;justify-content:center;margin-bottom:1rem}
+.auth-title{font-family:var(--fd);font-size:1.6rem;color:var(--tx);margin-bottom:.3rem}
+.auth-sub{font-size:.85rem;color:var(--txm);margin-bottom:1.75rem}
+.auth-google-btn{display:inline-flex;align-items:center;gap:.7rem;padding:.7rem 1.3rem;background:#fff;color:#222;border:1px solid #d9d9d9;border-radius:99px;font-size:.95rem;font-weight:600;cursor:pointer;transition:transform var(--tr),box-shadow var(--tr);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.auth-google-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.12)}
+.auth-google-btn:active{transform:translateY(0)}
+.auth-google-btn:disabled{opacity:.6;cursor:wait}
+.auth-error{margin-top:1rem;padding:.65rem .85rem;background:var(--erbg);color:var(--er);border-radius:8px;font-size:.85rem;font-weight:500}
+.auth-foot{margin-top:1.5rem;font-size:.75rem;color:var(--txf);line-height:1.45}
+
+/* User menu: dropdown sotto nome utente in nav */
+.user-menu{position:relative}
+.user-menu-trigger{display:inline-flex;align-items:center;gap:.45rem;height:36px;padding:0 .65rem;border-radius:var(--r2);background:transparent;color:var(--tx);font-size:.85rem;font-weight:600;cursor:pointer;transition:background var(--tr)}
+.user-menu-trigger:hover{background:var(--surface2)}
+.user-menu-avatar{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:var(--pr);color:#fff;font-weight:700;font-size:.85rem;flex-shrink:0}
+.user-menu-name{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.user-menu-dropdown{position:absolute;top:calc(100% + 6px);right:0;min-width:240px;background:var(--surface);border:1px solid var(--bord);border-radius:var(--r2);box-shadow:var(--sh3);padding:.5rem;display:none;z-index:200}
+.user-menu.open .user-menu-dropdown{display:block;animation:authFadeIn .15s ease-out}
+.user-menu-info{padding:.65rem .75rem;border-bottom:1px solid var(--div);margin-bottom:.4rem}
+.user-menu-fullname{font-weight:700;color:var(--tx);font-size:.9rem}
+.user-menu-email{color:var(--txm);font-size:.78rem;margin-top:2px;word-break:break-all}
+.user-menu-role{display:inline-block;margin-top:.4rem;padding:1px 8px;border-radius:99px;background:var(--surface2);color:var(--txm);font-size:.7rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.user-menu-role.role-admin{background:var(--prl);color:var(--pr)}
+.user-menu-logout{display:flex;align-items:center;gap:.5rem;width:100%;padding:.5rem .75rem;border-radius:var(--r1);background:transparent;color:var(--er);font-size:.85rem;font-weight:600;cursor:pointer;transition:background var(--tr);border:none}
+.user-menu-logout:hover{background:var(--erbg)}
+@media(max-width:560px){
+  .user-menu-name{display:none}
+  .user-menu-trigger{padding:0;width:36px;justify-content:center}
+}
+
+/* Admin badge in nav (accanto a Cestino) */
+.hbtn-admin{display:inline-flex;align-items:center;gap:.4rem;height:36px;padding:0 .85rem;border-radius:var(--r2);background:transparent;color:#d97706;border:1px solid #d97706;font-size:.85rem;font-weight:600;transition:all var(--tr);cursor:pointer}
+.hbtn-admin:hover{background:rgba(217,119,6,.08);color:#b45309;border-color:#b45309}
+.hbtn-admin:active{transform:scale(.97)}
+@media(max-width:560px){.hbtn-admin{padding:0;width:36px;justify-content:center} .hbtn-admin .hbtn-label{display:none}}
+
+/* Admin panel: lista utenti */
+.admin-user-row{display:flex;align-items:center;gap:.75rem;padding:.85rem 1rem;border-bottom:1px solid var(--div);transition:background var(--tr)}
+.admin-user-row:last-child{border-bottom:none}
+.admin-user-row:hover{background:var(--surface)}
+.admin-user-info{flex:1;min-width:0}
+.admin-user-name{font-weight:600;color:var(--tx);font-size:.95rem}
+.admin-user-email{color:var(--txm);font-size:.78rem;margin-top:2px;word-break:break-all}
+.admin-user-role{display:inline-block;margin-top:.3rem;padding:1px 8px;border-radius:99px;background:var(--surface2);color:var(--txm);font-size:.7rem;font-weight:700;text-transform:uppercase}
+.admin-user-role.role-admin{background:var(--prl);color:var(--pr)}
+.admin-user-protected{display:inline-flex;align-items:center;gap:.25rem;padding:4px 10px;border-radius:99px;background:var(--surface2);color:var(--txm);font-size:.75rem;font-weight:600}
+.admin-user-del{padding:.4rem .8rem;background:var(--erbg);color:var(--er);border-radius:var(--r2);font-size:.78rem;font-weight:600;cursor:pointer;transition:all var(--tr);border:none}
+.admin-user-del:hover{background:var(--er);color:#fff}
+
 /* Header: contenitore azioni + pulsante cestino */
 .hactions{display:flex;align-items:center;gap:.4rem}
 .hbtn-trash{display:inline-flex;align-items:center;gap:.4rem;height:36px;padding:0 .85rem;border-radius:var(--r2);background:transparent;color:var(--pr);border:1px solid var(--pr);font-size:.85rem;font-weight:600;transition:background var(--tr),color var(--tr),border-color var(--tr),box-shadow var(--tr);position:relative}
