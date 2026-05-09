@@ -56,6 +56,7 @@ input,textarea,select{font:inherit;color:inherit}
 }
 .htitle{font-family:var(--fd);font-size:clamp(1.125rem,1rem + .75vw,1.5rem)}
 .hsub{font-size:clamp(.75rem,.7rem + .25vw,.875rem);color:var(--txm);margin-top:1px}
+.hsub-ver{display:inline-block;margin-left:.4rem;padding:1px 6px;border-radius:99px;background:var(--surface2);color:var(--txf);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.7rem;font-weight:600;letter-spacing:.02em;vertical-align:1px;cursor:help}
 .ibtn{width:36px;height:36px;border-radius:var(--r2);display:flex;align-items:center;justify-content:center;color:var(--txm);transition:background var(--tr),color var(--tr)}
 .ibtn:hover{background:var(--surface2);color:var(--tx)}
 .main{max-width:1200px;margin:0 auto;padding:1.5rem 1rem 4rem}
