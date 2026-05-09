@@ -102,6 +102,282 @@ function hideLoader(){
 // ═══════════════════════════════════════════════════════════════════
 
 // ───────────────────────────────────────────────────────────
+// AUTH: login Google + whitelist + admin panel
+// - All'avvio: check sessione + check whitelist
+// - Se non autenticato: login screen
+// - Se autenticato ma non in whitelist: logout + msg
+// - Se autenticato e in whitelist: carica app + memorizza role
+// ───────────────────────────────────────────────────────────
+var currentUser = null; // { id, email, full_name, role }
+
+function authShowOverlay(errorMsg){
+  var ov = document.getElementById('authOverlay');
+  var loader = document.getElementById('page-loader');
+  var er = document.getElementById('authError');
+  if(loader) loader.style.display = 'none';
+  if(ov) ov.style.display = 'flex';
+  if(er){
+    if(errorMsg){er.textContent = errorMsg; er.style.display = 'block';}
+    else{er.style.display = 'none'; er.textContent = '';}
+  }
+  // Nasconde l'app
+  document.body.classList.add('auth-pending');
+}
+
+function authHideOverlay(){
+  var ov = document.getElementById('authOverlay');
+  if(ov) ov.style.display = 'none';
+  document.body.classList.remove('auth-pending');
+}
+
+async function checkWhitelist(client, email){
+  var emailLower = String(email||'').toLowerCase();
+  if(!emailLower) return null;
+  var res = await client.from('users_whitelist').select('id,email,full_name,role,protected').ilike('email', emailLower).limit(1);
+  if(res.error) throw res.error;
+  if(!res.data || !res.data.length) return null;
+  return res.data[0];
+}
+
+async function setupAuth(){
+  authShowOverlay(); // mostra subito login screen
+  var client;
+  try {
+    client = await getSupabaseClient();
+  } catch(e) {
+    authShowOverlay('Errore caricamento client autenticazione. Ricarica la pagina.');
+    return;
+  }
+
+  // Listener cambi auth (utile per logout, refresh token)
+  client.auth.onAuthStateChange(function(event, session){
+    if(event === 'SIGNED_OUT'){
+      currentUser = null;
+      authShowOverlay();
+      // ricarica per pulire stato runtime
+      setTimeout(function(){ window.location.reload(); }, 200);
+    }
+  });
+
+  // Verifica sessione esistente
+  var sessRes = await client.auth.getSession();
+  var session = sessRes.data && sessRes.data.session;
+  if(!session){
+    authShowOverlay();
+    return;
+  }
+
+  var email = session.user && session.user.email;
+  if(!email){
+    await client.auth.signOut();
+    authShowOverlay('Login senza email valida. Riprova.');
+    return;
+  }
+
+  // Whitelist check
+  var entry;
+  try { entry = await checkWhitelist(client, email); }
+  catch(e){
+    authShowOverlay('Errore verifica autorizzazioni. Riprova fra poco.');
+    return;
+  }
+  if(!entry){
+    await client.auth.signOut();
+    authShowOverlay('L\'email '+email+' non è autorizzata. Contatta l\'amministratore.');
+    return;
+  }
+
+  // Tutto ok: setta currentUser e prosegui boot app
+  currentUser = {
+    id: session.user.id,
+    email: entry.email,
+    full_name: entry.full_name,
+    role: entry.role,
+    protected: entry.protected
+  };
+
+  authHideOverlay();
+  renderUserMenu();
+  if(currentUser.role === 'admin') renderAdminBadge();
+
+  // Boot app (continua il flusso normale)
+  loadPost();
+  setupAutoRefresh();
+  setupVersionWatcher();
+}
+
+async function authSignInWithGoogle(){
+  var btn = document.getElementById('btnAuthGoogle');
+  if(btn){ btn.disabled = true; btn.querySelector('span').textContent = 'Apertura Google…'; }
+  try {
+    var client = await getSupabaseClient();
+    await client.auth.signInWithOAuth({
+      provider: 'google',
+      options: { redirectTo: window.location.origin + window.location.pathname }
+    });
+  } catch(e){
+    if(btn){ btn.disabled = false; btn.querySelector('span').textContent = 'Accedi con Google'; }
+    authShowOverlay('Errore apertura Google: '+(e&&e.message||e));
+  }
+}
+
+async function authSignOut(){
+  try {
+    var client = await getSupabaseClient();
+    await client.auth.signOut();
+  } catch(_){}
+  currentUser = null;
+  // onAuthStateChange triggera il reload
+}
+
+// User menu rendering
+function renderUserMenu(){
+  if(!currentUser) return;
+  var menu = document.getElementById('userMenu');
+  if(!menu) return;
+  menu.style.display = '';
+  var initial = (currentUser.full_name||currentUser.email||'?').charAt(0).toUpperCase();
+  document.getElementById('userMenuAvatar').textContent = initial;
+  document.getElementById('userMenuName').textContent = currentUser.full_name || currentUser.email;
+  document.getElementById('userMenuFullname').textContent = currentUser.full_name;
+  document.getElementById('userMenuEmail').textContent = currentUser.email;
+  var rolePill = document.getElementById('userMenuRole');
+  rolePill.textContent = currentUser.role==='admin'?'Admin':'Utente';
+  rolePill.className = 'user-menu-role'+(currentUser.role==='admin'?' role-admin':'');
+}
+
+function renderAdminBadge(){
+  var b = document.getElementById('btnAdminOpen');
+  if(b) b.style.display = '';
+}
+
+// ───────────────────────────────────────────────────────────
+// ADMIN PANEL: CRUD su users_whitelist
+// ───────────────────────────────────────────────────────────
+var adminUserToDelete = null; // { id, email, full_name }
+
+async function adminLoadUsers(){
+  var wrap = document.getElementById('adminUserList');
+  if(!wrap) return;
+  wrap.innerHTML = '<div style="padding:2rem;text-align:center"><div class="spin" style="margin:0 auto;border-color:rgba(46,125,94,.25);border-top-color:var(--pr);width:24px;height:24px"></div></div>';
+  try {
+    var client = await getSupabaseClient();
+    var res = await client.from('users_whitelist').select('id,email,full_name,role,protected,created_at').order('protected', { ascending: false }).order('full_name');
+    if(res.error) throw res.error;
+    var users = res.data || [];
+    if(!users.length){
+      wrap.innerHTML = '<div class="emp" style="padding:2rem"><h3>Nessun utente</h3><p>Aggiungi il primo utente.</p></div>';
+      return;
+    }
+    wrap.innerHTML = users.map(function(u){
+      var roleClass = u.role==='admin'?'role-admin':'';
+      var roleLabel = u.role==='admin'?'Admin':'Utente';
+      var actions = u.protected
+        ? '<span class="admin-user-protected" title="Account base, non eliminabile"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg> Protetto</span>'
+        : '<button type="button" class="admin-user-del" data-id="'+u.id+'" data-email="'+esc(u.email)+'" data-name="'+esc(u.full_name)+'">Elimina</button>';
+      return '<div class="admin-user-row" data-id="'+u.id+'">'
+        +'<div class="admin-user-info">'
+          +'<div class="admin-user-name">'+esc(u.full_name)+'</div>'
+          +'<div class="admin-user-email">'+esc(u.email)+'</div>'
+          +'<span class="admin-user-role '+roleClass+'">'+roleLabel+'</span>'
+        +'</div>'
+        +actions
+      +'</div>';
+    }).join('');
+  } catch(e){
+    wrap.innerHTML = '<div class="emp" style="padding:2rem"><h3>Errore</h3><p>'+esc(e.message||'Impossibile caricare utenti.')+'</p></div>';
+  }
+}
+
+function adminOpenPanel(){ apri('madmin'); adminLoadUsers(); }
+function adminOpenAddForm(){
+  document.getElementById('addUserName').value='';
+  document.getElementById('addUserEmail').value='';
+  document.querySelector('input[name="addUserRole"][value="user"]').checked = true;
+  document.getElementById('addUserErr').style.display='none';
+  apri('madminAdd');
+}
+
+async function adminConfirmAddUser(){
+  var name = (document.getElementById('addUserName').value||'').trim();
+  var email = (document.getElementById('addUserEmail').value||'').trim().toLowerCase();
+  var role = document.querySelector('input[name="addUserRole"]:checked').value;
+  var er = document.getElementById('addUserErr');
+  function showErr(m){ er.textContent = m; er.style.display='block'; }
+  if(!name || name.length<2){ showErr('Inserisci un nome valido.'); return; }
+  if(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){ showErr('Email non valida.'); return; }
+
+  var btn = document.getElementById('btnAdminAddConfirm');
+  btn.disabled = true; btn.textContent = 'Aggiungo…';
+  try {
+    var client = await getSupabaseClient();
+    var res = await client.from('users_whitelist').insert([{ email: email, full_name: name, role: role }]);
+    btn.disabled = false; btn.textContent = 'Aggiungi';
+    if(res.error){
+      if(res.error.code==='23505') showErr('Esiste già un utente con questa email.');
+      else showErr('Errore: '+res.error.message);
+      return;
+    }
+    chiudi('madminAdd');
+    fb(true,'Aggiunto', name+' può ora accedere all\'app.');
+    adminLoadUsers();
+  } catch(e){
+    btn.disabled = false; btn.textContent = 'Aggiungi';
+    showErr('Errore: '+(e.message||e));
+  }
+}
+
+async function adminPromptDelete(userId, userEmail, userName){
+  // Conta chiamate dell'utente per messaggio
+  var count = '?';
+  try {
+    var client = await getSupabaseClient();
+    // Trova l'auth.users.id dato l'email
+    var authRes = await fetch(SUPABASE_URL+'/rest/v1/rpc/get_user_chiamate_count',{
+      method:'POST',
+      headers:{
+        'apikey':SUPABASE_ANON_KEY,
+        'Authorization':'Bearer '+(await client.auth.getSession()).data.session.access_token,
+        'Content-Type':'application/json'
+      },
+      body: JSON.stringify({ target_email: userEmail })
+    });
+    if(authRes.ok){ var n = await authRes.json(); count = n; }
+  } catch(_){}
+
+  adminUserToDelete = { id: userId, email: userEmail, full_name: userName };
+  var msg = 'Stai per eliminare <b>'+esc(userName)+'</b> ('+esc(userEmail)+')<br><br>'
+    + (count!=='?'?'Verranno eliminate <b>'+count+' chiamate</b> (anche dal cestino).':'')
+    + '<br><b style="color:var(--er)">Operazione irreversibile.</b>';
+  document.getElementById('madminDelMsg').innerHTML = msg;
+  document.getElementById('adminDelConfirmInput').value = '';
+  var bc = document.getElementById('btnAdminDelConfirm');
+  bc.disabled = true; bc.style.opacity='.5';
+  apri('madminDel');
+  setTimeout(function(){ document.getElementById('adminDelConfirmInput').focus(); }, 200);
+}
+
+async function adminConfirmDelete(){
+  if(!adminUserToDelete) return;
+  var u = adminUserToDelete;
+  var btn = document.getElementById('btnAdminDelConfirm');
+  btn.disabled = true; btn.textContent = 'Elimino…';
+  try {
+    var client = await getSupabaseClient();
+    var res = await client.from('users_whitelist').delete().eq('id', u.id);
+    btn.disabled = false; btn.textContent = 'Elimina';
+    if(res.error){ fb(false,'Errore', res.error.message); return; }
+    chiudi('madminDel');
+    fb(true,'Eliminato', u.full_name+' e tutti i suoi dati sono stati rimossi.');
+    adminUserToDelete = null;
+    adminLoadUsers();
+  } catch(e){
+    btn.disabled = false; btn.textContent = 'Elimina';
+    fb(false,'Errore', e.message||String(e));
+  }
+}
+
+// ───────────────────────────────────────────────────────────
 // AUTO-REFRESH: real-time multi-device sync
 // - PRIMARY: Supabase Realtime (WebSocket push, sub-secondo)
 // - FALLBACK: polling 60s su max(updated_at) se Realtime fallisce
@@ -231,8 +507,11 @@ function getSupabaseClient(){
 function setupRealtime(){
   getSupabaseClient()
     .then(function(client){
+      // Filter user_id: ricevi solo eventi delle tue chiamate (le altrui sono già escluse da RLS)
+      var rtFilter = {event:'*',schema:'public',table:'chiamate'};
+      if(currentUser&&currentUser.id) rtFilter.filter = 'user_id=eq.'+currentUser.id;
       realtimeChannel=client.channel('chiamate-realtime')
-        .on('postgres_changes',{event:'*',schema:'public',table:'chiamate'},function(payload){
+        .on('postgres_changes',rtFilter,function(payload){
           // Skip "echo": eventi causati dalle nostre stesse scritture
           if(isWithinOwnWriteWindow())return;
           // Push event ricevuto → trigger refresh con debounce
@@ -504,9 +783,8 @@ document.addEventListener('DOMContentLoaded',function(){
   setupQuickLinks();
   registerServiceWorker();
   handleShortcutAction();
-  loadPost();
-  setupAutoRefresh();
-  setupVersionWatcher();
+  // setupAuth gestisce il check sessione e, SE ok, fa partire loadPost+setupAutoRefresh+setupVersionWatcher
+  setupAuth();
 
   var btnAdd=document.getElementById('btnAdd');
   var btnSave=document.getElementById('btnSave');
@@ -669,6 +947,60 @@ document.addEventListener('DOMContentLoaded',function(){
   if(btnExport)btnExport.addEventListener('click',openExportModal);
   if(btnExportCancel)btnExportCancel.addEventListener('click',function(){chiudi('mexport');});
   if(btnExportGo)btnExportGo.addEventListener('click',runExport);
+
+  // Auth: login Google + user menu + logout
+  var btnAuthGoogle = document.getElementById('btnAuthGoogle');
+  if(btnAuthGoogle) btnAuthGoogle.addEventListener('click', authSignInWithGoogle);
+
+  var userMenuBtn = document.getElementById('userMenuBtn');
+  if(userMenuBtn) userMenuBtn.addEventListener('click', function(e){
+    e.stopPropagation();
+    document.getElementById('userMenu').classList.toggle('open');
+  });
+  document.addEventListener('click', function(e){
+    var um = document.getElementById('userMenu');
+    if(um && um.classList.contains('open') && !um.contains(e.target)){
+      um.classList.remove('open');
+    }
+  });
+  var btnSignOut = document.getElementById('btnSignOut');
+  if(btnSignOut) btnSignOut.addEventListener('click', authSignOut);
+
+  // Admin panel
+  var btnAdminOpen = document.getElementById('btnAdminOpen');
+  var btnAdminClose = document.getElementById('btnAdminClose');
+  var btnAdminAddUser = document.getElementById('btnAdminAddUser');
+  var btnAdminAddCancel = document.getElementById('btnAdminAddCancel');
+  var btnAdminAddConfirm = document.getElementById('btnAdminAddConfirm');
+  var btnAdminDelCancel = document.getElementById('btnAdminDelCancel');
+  var btnAdminDelConfirm = document.getElementById('btnAdminDelConfirm');
+  if(btnAdminOpen) btnAdminOpen.addEventListener('click', adminOpenPanel);
+  if(btnAdminClose) btnAdminClose.addEventListener('click', function(){chiudi('madmin');});
+  if(btnAdminAddUser) btnAdminAddUser.addEventListener('click', adminOpenAddForm);
+  if(btnAdminAddCancel) btnAdminAddCancel.addEventListener('click', function(){chiudi('madminAdd');});
+  if(btnAdminAddConfirm) btnAdminAddConfirm.addEventListener('click', adminConfirmAddUser);
+  if(btnAdminDelCancel) btnAdminDelCancel.addEventListener('click', function(){chiudi('madminDel');adminUserToDelete=null;});
+  if(btnAdminDelConfirm) btnAdminDelConfirm.addEventListener('click', adminConfirmDelete);
+
+  // Click delegato su "Elimina" nelle righe utente
+  var adminUserList = document.getElementById('adminUserList');
+  if(adminUserList){
+    adminUserList.addEventListener('click', function(e){
+      var del = e.target.closest('.admin-user-del');
+      if(del) adminPromptDelete(del.dataset.id, del.dataset.email, del.dataset.name);
+    });
+  }
+
+  // Input doppia conferma elimina (digita "ELIMINA")
+  var delConfirmInput = document.getElementById('adminDelConfirmInput');
+  if(delConfirmInput){
+    delConfirmInput.addEventListener('input', function(){
+      var ok = this.value.trim() === 'ELIMINA';
+      var bc = document.getElementById('btnAdminDelConfirm');
+      bc.disabled = !ok;
+      bc.style.opacity = ok ? '1' : '.5';
+    });
+  }
 
   // Cestino chiamate
   var btnTrashOpen=document.getElementById('btnTrashOpen');
@@ -1200,7 +1532,7 @@ function salva(){
     markOwnWrite();
     sbFetch('chiamate',{
       method:'POST',
-      body:{timestamp_chiamata:tsISO,postazione:p||'',descrizione:d,note:n||'',completato:false},
+      body:{timestamp_chiamata:tsISO,postazione:p||'',descrizione:d,note:n||'',completato:false,user_id:currentUser?currentUser.id:null},
       prefer:'return=minimal'
     }).then(function(res){
       btn.disabled=false;btn.innerHTML=svgSave()+' Salva';
@@ -2354,6 +2686,9 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mtrash'))chiudi('mtrash');
   if(e.target===document.getElementById('mtrashEmpty'))chiudi('mtrashEmpty');
   if(e.target===document.getElementById('mexport'))chiudi('mexport');
+  if(e.target===document.getElementById('madmin'))chiudi('madmin');
+  if(e.target===document.getElementById('madminAdd'))chiudi('madminAdd');
+  if(e.target===document.getElementById('madminDel')){chiudi('madminDel');adminUserToDelete=null;}
 });
 
 
