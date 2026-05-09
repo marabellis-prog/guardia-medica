@@ -499,7 +499,7 @@ document.addEventListener('DOMContentLoaded',function(){
   initEls();
   // Mostra il SHA del deploy nel sottotitolo (per debug visivo)
   var hsub=document.querySelector('.hsub');
-  if(hsub)hsub.innerHTML='Registro Chiamate <span class="hsub-ver" title="Build '+esc(BUILD_VERSION)+'">v'+esc(BUILD_SHA)+'</span>';
+  if(hsub)hsub.innerHTML='Registro Chiamate. <span class="hsub-ver" title="Build '+esc(BUILD_VERSION)+'">v'+esc(BUILD_SHA)+'</span>';
   setupTableDelegation();
   setupQuickLinks();
   registerServiceWorker();
