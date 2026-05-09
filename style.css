@@ -281,6 +281,34 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
 .trash-btn-delete{background:var(--erbg);color:var(--er)}
 .trash-btn-delete:hover{background:var(--er);color:#fff}
 
+/* Banner: nuovi dati remoti disponibili (multi-device sync) */
+.refresh-banner{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9050;
+  display:flex;align-items:center;gap:.6rem;
+  padding:.6rem .55rem .6rem 1rem;
+  background:var(--prl);color:var(--pr);
+  border:1px solid var(--pr);
+  border-radius:99px;
+  box-shadow:var(--sh3);
+  font-size:.85rem;font-weight:600;
+  animation:rfSlideUp .25s ease-out;
+  max-width:calc(100vw - 32px);
+}
+.refresh-banner button{
+  padding:.35rem .9rem;
+  background:var(--pr);color:#fff;
+  border-radius:99px;
+  font-weight:700;font-size:.8rem;
+  cursor:pointer;border:none;
+  transition:background var(--tr);
+}
+.refresh-banner button:hover{background:var(--prh)}
+@keyframes rfSlideUp{from{opacity:0;transform:translate(-50%,12px)}to{opacity:1;transform:translate(-50%,0)}}
+@media(max-width:480px){
+  .refresh-banner{left:8px;right:8px;transform:none;max-width:none;justify-content:center}
+  @keyframes rfSlideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+}
+
 /* Banner: nuova versione disponibile */
 .update-banner{
   position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9200;
