@@ -23,11 +23,16 @@ function initEls(){
 // SUPABASE API HELPER
 // ═══════════════════════════════════════════════════════════════════
 
+// JWT corrente per richieste autenticate. Popolato da setupAuth dopo login.
+// Le RLS richiedono authenticated → senza JWT le query tornano vuote.
+var currentJwt = null;
+
 function sbFetch(path,opts){
   opts=opts||{};
+  var token = currentJwt || SUPABASE_ANON_KEY;
   var headers={
     'apikey':SUPABASE_ANON_KEY,
-    'Authorization':'Bearer '+SUPABASE_ANON_KEY,
+    'Authorization':'Bearer '+token,
     'Content-Type':'application/json'
   };
   if(opts.prefer)headers['Prefer']=opts.prefer;
@@ -38,6 +43,16 @@ function sbFetch(path,opts){
   };
   if(opts.signal)fetchOpts.signal=opts.signal;
   return fetch(SUPABASE_URL+'/rest/v1/'+path,fetchOpts);
+}
+
+// Helper per i fetch raw (non via sbFetch) che hanno bisogno di JWT
+function authHeaders(){
+  var token = currentJwt || SUPABASE_ANON_KEY;
+  return {
+    'apikey': SUPABASE_ANON_KEY,
+    'Authorization': 'Bearer ' + token,
+    'Content-Type': 'application/json'
+  };
 }
 
 
@@ -158,9 +173,12 @@ async function setupAuth(){
   client.auth.onAuthStateChange(function(event, session){
     if(event === 'SIGNED_OUT'){
       currentUser = null;
+      currentJwt = null;
       authShowOverlay();
-      // ricarica per pulire stato runtime
       setTimeout(function(){ window.location.reload(); }, 200);
+    } else if(event === 'TOKEN_REFRESHED' && session){
+      // Aggiorna JWT su refresh per non perdere autenticazione
+      currentJwt = session.access_token;
     }
   });
 
@@ -171,6 +189,9 @@ async function setupAuth(){
     authShowOverlay();
     return;
   }
+
+  // Popola subito il JWT per le query autenticate
+  currentJwt = session.access_token;
 
   var email = session.user && session.user.email;
   if(!email){
@@ -395,10 +416,7 @@ function isWithinOwnWriteWindow(){return (Date.now()-lastOwnWriteAt)<OWN_WRITE_S
 
 function fetchLatestUpdate(){
   return fetch(SUPABASE_URL+'/rest/v1/chiamate?select=updated_at&order=updated_at.desc&limit=1',{
-    headers:{
-      'apikey':SUPABASE_ANON_KEY,
-      'Authorization':'Bearer '+SUPABASE_ANON_KEY
-    }
+    headers:authHeaders()
   }).then(function(r){return r.json();}).then(function(data){
     if(!data||!data.length||!data[0].updated_at)return 0;
     return new Date(data[0].updated_at).getTime();
@@ -1333,14 +1351,10 @@ function searchChiamate(filters){
   }
   params+='&order=timestamp_chiamata.desc&limit=500';
 
+  var srchHeaders = authHeaders(); srchHeaders['Prefer'] = 'count=exact';
   return fetch(SUPABASE_URL+'/rest/v1/'+params,{
     method:'GET',
-    headers:{
-      'apikey':SUPABASE_ANON_KEY,
-      'Authorization':'Bearer '+SUPABASE_ANON_KEY,
-      'Content-Type':'application/json',
-      'Prefer':'count=exact'
-    },
+    headers:srchHeaders,
     signal:sig
   }).then(function(res){
     var cr=res.headers.get('content-range')||'';
@@ -1570,14 +1584,10 @@ function loadRows(pg){
   }
   params+='&limit='+CURRENT_PAGE_SIZE+'&offset='+offset;
 
+  var loadHeaders = authHeaders(); loadHeaders['Prefer'] = 'count=exact';
   fetch(SUPABASE_URL+'/rest/v1/'+params,{
     method:'GET',
-    headers:{
-      'apikey':SUPABASE_ANON_KEY,
-      'Authorization':'Bearer '+SUPABASE_ANON_KEY,
-      'Content-Type':'application/json',
-      'Prefer':'count=exact'
-    }
+    headers:loadHeaders
   }).then(function(res){
     var cr=res.headers.get('content-range')||'';
     var total=parseInt((cr.split('/')[1]||'0'),10)||0;
@@ -2212,12 +2222,9 @@ function trashFetch(){
 
 function trashCount(){
   // HEAD via Prefer count=exact
+  var trashHeaders = authHeaders(); trashHeaders['Prefer'] = 'count=exact';
   return fetch(SUPABASE_URL+'/rest/v1/chiamate?deleted_at=not.is.null&select=id&limit=1',{
-    headers:{
-      'apikey':SUPABASE_ANON_KEY,
-      'Authorization':'Bearer '+SUPABASE_ANON_KEY,
-      'Prefer':'count=exact'
-    }
+    headers:trashHeaders
   }).then(function(res){
     var cr=res.headers.get('content-range')||'';
     return parseInt((cr.split('/')[1]||'0'),10)||0;
