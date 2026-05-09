@@ -62,22 +62,20 @@ jobs:
           force_orphan: true
           commit_message: 'Deploy build ${{ steps.ver.outputs.BUILD_VERSION }}'
 
-      - name: Aspetta propagazione CDN GitHub Pages
+      - name: Aspetta propagazione CDN GitHub Pages (best effort, max 90s)
         run: |
           BUILD_VERSION=${{ steps.ver.outputs.BUILD_VERSION }}
           URL=https://marabellis-prog.github.io/guardia-medica/script.js
           NEEDLE="BUILD_VERSION = '$BUILD_VERSION'"
-          echo "Cerco: $NEEDLE"
-          for i in $(seq 1 60); do
+          for i in $(seq 1 18); do
             BODY=$(curl -fsS -H "Cache-Control: no-cache" "$URL?_check=$(date +%s%N)" 2>/dev/null || echo "")
             if echo "$BODY" | grep -qF "$NEEDLE"; then
               echo "OK CDN aggiornato dopo $((i*5))s"
               exit 0
             fi
-            echo "  tentativo $i/60 - non ancora propagato, attendo 5s..."
             sleep 5
           done
-          echo "Timeout CDN dopo 5 minuti, notifico comunque (client polling come safety net)"
+          echo "CDN non ancora pronto dopo 90s; il client farà polling (safety net 10 min)"
 
       - name: Bump Supabase app_version (Realtime push)
         run: |
