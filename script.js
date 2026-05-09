@@ -256,6 +256,14 @@ document.addEventListener('DOMContentLoaded',function(){
   if(btnPostDelCancel)btnPostDelCancel.addEventListener('click',function(){chiudi('mpostDel');});
   if(btnPostDelConfirm)btnPostDelConfirm.addEventListener('click',confermaEliminaPostazione);
 
+  // Export
+  var btnExport=document.getElementById('btnExport');
+  var btnExportCancel=document.getElementById('btnExportCancel');
+  var btnExportGo=document.getElementById('btnExportGo');
+  if(btnExport)btnExport.addEventListener('click',openExportModal);
+  if(btnExportCancel)btnExportCancel.addEventListener('click',function(){chiudi('mexport');});
+  if(btnExportGo)btnExportGo.addEventListener('click',runExport);
+
   // Cestino chiamate
   var btnTrashOpen=document.getElementById('btnTrashOpen');
   var btnTrashClose=document.getElementById('btnTrashClose');
@@ -1873,6 +1881,7 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mphone'))chiudi('mphone');
   if(e.target===document.getElementById('mtrash'))chiudi('mtrash');
   if(e.target===document.getElementById('mtrashEmpty'))chiudi('mtrashEmpty');
+  if(e.target===document.getElementById('mexport'))chiudi('mexport');
 });
 
 
@@ -1973,6 +1982,241 @@ function svgHourglass(){return '<svg width="16" height="16" viewBox="0 0 24 24" 
 function svgSearch(){return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>';}
 function svgTrash(){return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>';}
 function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+// ───────────────────────────────────────────────────────────
+// EXPORT: CSV / Excel (XLSX, lazy) / PDF (via stampa nativa)
+// ───────────────────────────────────────────────────────────
+function dateStamp(){
+  var d=new Date();
+  var p=function(n){return String(n).padStart(2,'0');};
+  return d.getFullYear()+p(d.getMonth()+1)+p(d.getDate())+'_'+p(d.getHours())+p(d.getMinutes());
+}
+
+function downloadFile(content,filename,mime){
+  var blob=content instanceof Blob?content:new Blob([content],{type:mime});
+  var url=URL.createObjectURL(blob);
+  var a=document.createElement('a');
+  a.href=url;a.download=filename;
+  document.body.appendChild(a);a.click();
+  document.body.removeChild(a);
+  setTimeout(function(){URL.revokeObjectURL(url);},1000);
+}
+
+function loadScriptOnce(src){
+  return new Promise(function(resolve,reject){
+    if(document.querySelector('script[src="'+src+'"]')){resolve();return;}
+    var s=document.createElement('script');
+    s.src=src;s.async=true;
+    s.onload=function(){resolve();};
+    s.onerror=function(){reject(new Error('Load failed: '+src));};
+    document.head.appendChild(s);
+  });
+}
+
+function fetchAllForExport(filters){
+  var batchSize=1000;
+  var offset=0;
+  var all=[];
+  function fetchBatch(){
+    var params='chiamate?select=*&deleted_at=is.null';
+    if(filters.dateFrom){
+      var df=new Date(filters.dateFrom);df.setHours(0,0,0,0);
+      params+='&timestamp_chiamata=gte.'+df.toISOString();
+    }
+    if(filters.dateTo){
+      var dt=new Date(filters.dateTo);dt.setHours(23,59,59,999);
+      params+='&timestamp_chiamata=lte.'+dt.toISOString();
+    }
+    if(filters.postazione){
+      params+='&postazione=eq.'+encodeURIComponent(filters.postazione);
+    }
+    params+='&order=timestamp_chiamata.desc&limit='+batchSize+'&offset='+offset;
+    return sbFetch(params).then(function(res){return res.json();}).then(function(data){
+      all=all.concat(data);
+      if(data.length===batchSize){offset+=batchSize;return fetchBatch();}
+      return all;
+    });
+  }
+  return fetchBatch();
+}
+
+function exportCSV(records){
+  var sep=';'; // separatore standard per Excel italiano
+  var header=['ID','Data/Ora','Postazione','Descrizione','Note','Stato'].join(sep);
+  var quote=function(s){return '"'+String(s==null?'':s).replace(/"/g,'""').replace(/\r\n/g,'\n').replace(/\r/g,'\n')+'"';};
+  var rows=records.map(function(r){
+    return [
+      r.id,
+      formatTSFromISO(r.timestamp_chiamata),
+      r.postazione||'',
+      r.descrizione||'',
+      r.note||'',
+      r.completato?'Completata':'In attesa'
+    ].map(quote).join(sep);
+  });
+  // BOM ﻿ per UTF-8 corretto in Excel
+  var csv='﻿'+header+'\r\n'+rows.join('\r\n');
+  downloadFile(csv,'chiamate_'+dateStamp()+'.csv','text/csv;charset=utf-8;');
+}
+
+function exportXLSX(records){
+  return loadScriptOnce('https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js').then(function(){
+    if(!window.XLSX)throw new Error('XLSX non caricato');
+    var data=[['ID','Data/Ora','Postazione','Descrizione','Note','Stato']];
+    records.forEach(function(r){
+      data.push([
+        r.id,
+        formatTSFromISO(r.timestamp_chiamata),
+        r.postazione||'',
+        r.descrizione||'',
+        r.note||'',
+        r.completato?'Completata':'In attesa'
+      ]);
+    });
+    var ws=window.XLSX.utils.aoa_to_sheet(data);
+    ws['!cols']=[{wch:6},{wch:18},{wch:14},{wch:60},{wch:40},{wch:12}];
+    // Freeze prima riga
+    ws['!freeze']={ySplit:1};
+    var wb=window.XLSX.utils.book_new();
+    window.XLSX.utils.book_append_sheet(wb,ws,'Chiamate');
+    window.XLSX.writeFile(wb,'chiamate_'+dateStamp()+'.xlsx');
+  });
+}
+
+function exportPDF(records){
+  // Approccio: nuova finestra con HTML formattato, l'utente sceglie "Salva come PDF" dal dialog di stampa.
+  // Niente librerie, supporto UTF-8 perfetto, output professionale.
+  var html=
+    '<!DOCTYPE html><html lang="it"><head><meta charset="UTF-8"><title>Registro Chiamate · '+dateStamp()+'</title>'
+    +'<style>'
+    +'@page{size:A4 landscape;margin:12mm}'
+    +'*{box-sizing:border-box}'
+    +'body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Arial,sans-serif;color:#222;padding:8px;font-size:11px;line-height:1.4}'
+    +'h1{color:#2e7d5e;margin:0 0 4px;font-size:18px}'
+    +'.meta{color:#666;font-size:10px;margin-bottom:14px;display:flex;gap:18px;flex-wrap:wrap}'
+    +'.meta b{color:#222}'
+    +'table{width:100%;border-collapse:collapse;font-size:9.5px}'
+    +'thead{background:#2e7d5e;color:#fff}'
+    +'thead tr{break-inside:avoid}'
+    +'th{padding:6px 8px;text-align:left;font-weight:600;font-size:10px;letter-spacing:.3px;text-transform:uppercase}'
+    +'td{padding:5px 8px;border-bottom:1px solid #e3e0d2;vertical-align:top;white-space:pre-wrap;word-break:break-word}'
+    +'tbody tr:nth-child(even){background:#f8f6ee}'
+    +'tbody tr.done td{color:#5a5a5a}'
+    +'tr{break-inside:avoid;page-break-inside:avoid}'
+    +'.num{font-variant-numeric:tabular-nums}'
+    +'.tag{display:inline-block;padding:1px 8px;border-radius:99px;background:#e0ebe5;color:#2e7d5e;font-size:9px;font-weight:600}'
+    +'.st-ok{color:#2e7d5e;font-weight:600}'
+    +'.st-pend{color:#b07a00;font-weight:600}'
+    +'.foot{margin-top:14px;font-size:9px;color:#999;text-align:right}'
+    +'@media print{body{padding:0}thead{display:table-header-group}}'
+    +'</style></head><body>';
+  html+='<h1>Registro Chiamate Guardia Medica</h1>';
+  html+='<div class="meta">'
+    +'<span><b>Esportato il</b> '+esc(new Date().toLocaleString('it-IT'))+'</span>'
+    +'<span><b>Totale</b> '+records.length+' chiamat'+(records.length===1?'a':'e')+'</span>'
+    +'</div>';
+  html+='<table><thead><tr>'
+    +'<th style="width:30px">#</th>'
+    +'<th style="width:90px">Data / Ora</th>'
+    +'<th style="width:80px">Postazione</th>'
+    +'<th>Descrizione</th>'
+    +'<th style="width:30%">Note</th>'
+    +'<th style="width:60px">Stato</th>'
+    +'</tr></thead><tbody>';
+  records.forEach(function(r){
+    var stCls=r.completato?'st-ok':'st-pend';
+    var stTxt=r.completato?'✓ Completata':'⏳ In attesa';
+    html+='<tr'+(r.completato?' class="done"':'')+'>'
+      +'<td class="num">'+r.id+'</td>'
+      +'<td class="num">'+esc(formatTSFromISO(r.timestamp_chiamata))+'</td>'
+      +'<td><span class="tag">'+esc(r.postazione||'—')+'</span></td>'
+      +'<td>'+esc(r.descrizione||'')+'</td>'
+      +'<td>'+esc(r.note||'')+'</td>'
+      +'<td class="'+stCls+'">'+stTxt+'</td>'
+      +'</tr>';
+  });
+  html+='</tbody></table>';
+  html+='<div class="foot">Generato da Guardia Medica · '+window.location.host+'</div>';
+  html+='</body></html>';
+
+  var w=window.open('','_blank');
+  if(!w){alert('Il browser ha bloccato la finestra di stampa. Abilita i popup per questo sito.');return Promise.reject();}
+  w.document.write(html);
+  w.document.close();
+  // Attendi il rendering, poi chiama print
+  return new Promise(function(resolve){
+    w.onload=function(){
+      setTimeout(function(){
+        try{w.focus();w.print();}catch(e){}
+        resolve();
+      },200);
+    };
+    // Fallback se onload non scatta (pagine già caricate)
+    setTimeout(function(){try{w.focus();w.print();}catch(e){}resolve();},800);
+  });
+}
+
+function openExportModal(){
+  // Pre-popola data range se c'è un filtro attivo
+  var df=document.getElementById('exportDateFrom');
+  var dt=document.getElementById('exportDateTo');
+  var ep=document.getElementById('exportPost');
+  if(df)df.value=(currentFilters&&currentFilters.dateFrom)||'';
+  if(dt)dt.value=(currentFilters&&currentFilters.dateTo)||'';
+  // Popola dropdown postazioni
+  if(ep){
+    ep.innerHTML='<option value="">Tutte le postazioni</option>';
+    POST.forEach(function(p){
+      var o=document.createElement('option');o.value=p.nome;o.textContent=p.nome;ep.appendChild(o);
+    });
+    ep.value=(currentFilters&&currentFilters.postazione)||'';
+  }
+  var info=document.getElementById('exportInfo');
+  if(info){info.style.display='none';info.textContent='';}
+  apri('mexport');
+}
+
+function runExport(){
+  var dateFrom=document.getElementById('exportDateFrom').value;
+  var dateTo=document.getElementById('exportDateTo').value;
+  var post=document.getElementById('exportPost').value;
+  var fmt=document.querySelector('input[name="exportFmt"]:checked').value;
+  var btn=document.getElementById('btnExportGo');
+  var info=document.getElementById('exportInfo');
+  if(btn){btn.disabled=true;btn.innerHTML='<div class="spin"></div> Caricamento dati…';}
+  if(info){info.style.display='block';info.textContent='Recupero le chiamate…';}
+
+  fetchAllForExport({dateFrom:dateFrom,dateTo:dateTo,postazione:post}).then(function(records){
+    if(info)info.textContent=records.length+' chiamat'+(records.length===1?'a trovata':'e trovate')+'. Generazione '+fmt.toUpperCase()+'…';
+    if(records.length===0){
+      if(btn){btn.disabled=false;btn.innerHTML=svgExport()+' Esporta';}
+      fb(false,'Nessun dato','Nessuna chiamata trovata con questi filtri.');
+      if(info){info.style.display='none';}
+      return;
+    }
+    var p;
+    if(fmt==='csv'){exportCSV(records);p=Promise.resolve();}
+    else if(fmt==='xlsx')p=exportXLSX(records);
+    else if(fmt==='pdf')p=exportPDF(records);
+    else p=Promise.reject(new Error('Formato sconosciuto'));
+
+    p.then(function(){
+      if(btn){btn.disabled=false;btn.innerHTML=svgExport()+' Esporta';}
+      chiudi('mexport');
+      fb(true,'Esportate',records.length+' chiamat'+(records.length===1?'a esportata':'e esportate')+' in formato '+fmt.toUpperCase()+'.');
+    }).catch(function(e){
+      if(btn){btn.disabled=false;btn.innerHTML=svgExport()+' Esporta';}
+      if(info){info.style.display='none';}
+      fb(false,'Errore export',e&&e.message?e.message:'Esportazione fallita.');
+    });
+  }).catch(function(){
+    if(btn){btn.disabled=false;btn.innerHTML=svgExport()+' Esporta';}
+    if(info){info.style.display='none';}
+    fb(false,'Errore','Impossibile scaricare i dati. Controlla la connessione.');
+  });
+}
+
+function svgExport(){return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';}
 
 // ───────────────────────────────────────────────────────────
 // CLICK-TO-CALL: trasforma numeri di telefono in link
