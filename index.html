@@ -541,13 +541,17 @@
         <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/>
       </svg>
     </div>
-    <div class="mtit">Come vuoi chiamare?</div>
-    <div class="mmsg" id="mphoneNum" style="font-size:1.25rem;font-weight:700;color:var(--tx);font-variant-numeric:tabular-nums;letter-spacing:.5px;margin-top:.4rem"></div>
+    <div class="mtit" id="mphoneTitle">Come vuoi chiamare?</div>
+    <div class="mphone-num-area">
+      <div class="mphone-num-view" id="mphoneNum"></div>
+      <input type="tel" id="mphoneInput" class="mphone-input" inputmode="tel" autocomplete="off" maxlength="20" style="display:none">
+      <div class="mphone-err" id="mphoneErr" style="display:none">Numero non valido</div>
+    </div>
     <div class="mac" style="margin-top:1.25rem;flex-wrap:wrap">
       <button class="bcan" id="btnPhoneCancel" type="button">Annulla</button>
       <button class="bcan" id="btnPhoneEdit" type="button" title="Modifica il numero" style="display:flex;align-items:center;gap:.35rem">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
-        Modifica
+        <svg id="phoneEditIco" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        <span id="phoneEditLabel">Modifica</span>
       </button>
       <button class="bconf2" id="btnPhoneAnon" type="button" title="Antepone #31# per nascondere il tuo numero">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><path d="M17.94 17.94A10 10 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
