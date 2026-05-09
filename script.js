@@ -96,10 +96,39 @@ function hideLoader(){
 // DOM READY
 // ═══════════════════════════════════════════════════════════════════
 
+// ───────────────────────────────────────────────────────────
+// LINK ESTERNI rapidi (Tessera Sanitaria, Prescrittori Lazio)
+// Riutilizza la finestra/tab esistente se ancora aperta,
+// così non ricarica la sessione di login.
+// ───────────────────────────────────────────────────────────
+var externalWindows={};
+
+function openExternalLink(url,name){
+  var w=externalWindows[name];
+  if(w&&!w.closed){
+    try{w.focus();return;}catch(e){/* fallback: riapri */}
+  }
+  // window.open con name come identificatore: se già aperto altrove con lo stesso name
+  // il browser lo riutilizza. Diversamente apre nuova finestra/tab.
+  externalWindows[name]=window.open(url,name);
+}
+
+function setupQuickLinks(){
+  document.querySelectorAll('.hquick-link').forEach(function(link){
+    link.addEventListener('click',function(e){
+      e.preventDefault();
+      var url=this.dataset.extUrl;
+      var name=this.dataset.extName||'_blank';
+      if(url)openExternalLink(url,name);
+    });
+  });
+}
+
 document.addEventListener('DOMContentLoaded',function(){
 
   initEls();
   setupTableDelegation();
+  setupQuickLinks();
   loadPost();
 
   var btnAdd=document.getElementById('btnAdd');
