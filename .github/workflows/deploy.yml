@@ -1,0 +1,91 @@
+name: Deploy guardia-medica
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'README.md'
+      - '.github/workflows/keep-alive.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Genera BUILD_VERSION (Unix ms)
+        id: ver
+        run: |
+          BUILD_VERSION=$(date +%s%3N)
+          echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_OUTPUT
+          echo "Build version: $BUILD_VERSION"
+
+      - name: Inietta BUILD_VERSION in script.js
+        run: |
+          sed -i "s/var BUILD_VERSION = '[^']*';/var BUILD_VERSION = '${{ steps.ver.outputs.BUILD_VERSION }}';/" script.js
+          echo 'Verifica:'
+          grep -m1 'var BUILD_VERSION' script.js
+
+      - name: Aggiorna cache busters in index.html
+        run: |
+          sed -i 's|?v=[^"&[:space:]]*|?v=${{ steps.ver.outputs.BUILD_VERSION }}|g' index.html
+          echo 'Verifica:'
+          grep -E '\?v=' index.html | head -3
+
+      - name: Crea .nojekyll
+        run: touch .nojekyll
+
+      - name: Estrai credenziali Supabase da config.js
+        id: supa
+        run: |
+          URL=$(grep -oE "SUPABASE_URL = '[^']*'" config.js | sed "s/SUPABASE_URL = '//;s/'$//")
+          KEY=$(grep -oE "SUPABASE_ANON_KEY = '[^']*'" config.js | sed "s/SUPABASE_ANON_KEY = '//;s/'$//")
+          echo "URL=$URL" >> $GITHUB_OUTPUT
+          echo "::add-mask::$KEY"
+          echo "KEY=$KEY" >> $GITHUB_OUTPUT
+
+      - name: Deploy a gh-pages branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .
+          publish_branch: gh-pages
+          force_orphan: true
+          commit_message: 'Deploy build ${{ steps.ver.outputs.BUILD_VERSION }}'
+
+      - name: Aspetta propagazione CDN GitHub Pages
+        run: |
+          BUILD_VERSION=${{ steps.ver.outputs.BUILD_VERSION }}
+          URL=https://marabellis-prog.github.io/guardia-medica/script.js
+          NEEDLE="BUILD_VERSION = '$BUILD_VERSION'"
+          echo "Cerco: $NEEDLE"
+          for i in $(seq 1 60); do
+            BODY=$(curl -fsS -H "Cache-Control: no-cache" "$URL?_check=$(date +%s%N)" 2>/dev/null || echo "")
+            if echo "$BODY" | grep -qF "$NEEDLE"; then
+              echo "OK CDN aggiornato dopo $((i*5))s"
+              exit 0
+            fi
+            echo "  tentativo $i/60 - non ancora propagato, attendo 5s..."
+            sleep 5
+          done
+          echo "Timeout CDN dopo 5 minuti, notifico comunque (client polling come safety net)"
+
+      - name: Bump Supabase app_version (Realtime push)
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            "${{ steps.supa.outputs.URL }}/rest/v1/rpc/bump_app_version" \
+            -H "apikey: ${{ steps.supa.outputs.KEY }}" \
+            -H "Authorization: Bearer ${{ steps.supa.outputs.KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{}')
+          echo "RPC status: $STATUS"
+          [ "$STATUS" = "200" ] || exit 1
