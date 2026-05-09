@@ -29,11 +29,14 @@ jobs:
           echo "BUILD_VERSION=$BUILD_VERSION" >> $GITHUB_OUTPUT
           echo "Build version: $BUILD_VERSION"
 
-      - name: Inietta BUILD_VERSION in script.js
+      - name: Inietta BUILD_VERSION + BUILD_SHA in script.js
         run: |
+          SHORT_SHA=${GITHUB_SHA:0:7}
           sed -i "s/var BUILD_VERSION = '[^']*';/var BUILD_VERSION = '${{ steps.ver.outputs.BUILD_VERSION }}';/" script.js
+          sed -i "s/var BUILD_SHA = '[^']*';/var BUILD_SHA = '$SHORT_SHA';/" script.js
           echo 'Verifica:'
           grep -m1 'var BUILD_VERSION' script.js
+          grep -m1 'var BUILD_SHA' script.js
 
       - name: Aggiorna cache busters in index.html
         run: |
