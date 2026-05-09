@@ -328,6 +328,8 @@ document.addEventListener('DOMContentLoaded',function(){
     });
   }
 
+  // Click fuori → chiude solo i dropdown postazione
+  // (Il vecchio warning "modifiche non salvate" non serve più: l'autosave + coda offline lo gestiscono)
   document.addEventListener('click',function(e){
     document.querySelectorAll('.post-dropdown.open').forEach(function(dd){
       if(!dd.parentElement.contains(e.target)){
@@ -335,21 +337,23 @@ document.addEventListener('DOMContentLoaded',function(){
         var tr=dd.closest('tr');if(tr)tr.classList.remove('has-open-dd');
       }
     });
-    if(!warnOpen&&getDirtyCount()>0){
-      var tgt=e.target;
-      if(tgt&&tgt.nodeType===3)tgt=tgt.parentElement;
-      if(!tgt||!tgt.closest)return;
-      var twrap=document.querySelector('.twrap');
-      var inTable=twrap&&twrap.contains(tgt);
-      var inModal=tgt.closest('.mbox');
-      var inForm=tgt.closest('.fc');
-      var inSrch=tgt.closest('.srch-panel');
-      var inDel=tgt.closest('.idel');
-      if(!inTable&&!inModal&&!inForm&&!inSrch&&!inDel){
-        triggerDirtyWarning();
-      }
-    }
   });
+
+  // Prima di chiudere la tab/finestra: salva tutto il dirtyMap nella coda offline
+  // (così le modifiche degli ultimi 1.5s che non sono ancora state autosalvate non si perdono)
+  window.addEventListener('beforeunload',function(){
+    var keys=Object.keys(dirtyMap);
+    keys.forEach(function(k){
+      var info=dirtyMap[k];if(!info||!info.tr)return;
+      if(!document.body.contains(info.tr))return;
+      var body=buildPatchBodyFromRow(info.tr);
+      if(body)syncEnqueue(k,body);
+    });
+  });
+
+  // Al boot: prova subito a smaltire la coda + mostra badge se necessario
+  syncRenderBadge();
+  syncProcess();
 });
 
 
@@ -776,6 +780,14 @@ function loadRows(pg){
     var inf=result.total>0?result.total+' chiamat'+(result.total===1?'a':'e')+' in totale':'';
     if(showIncompleteOnly&&result.total>0)inf='⏳ '+result.total+' in attesa';
     (els.linfo||document.getElementById('linfo')).textContent=inf;
+    // Marca le righe che hanno un sync in coda
+    var pendingIds=syncLoadQueue().map(function(e){return String(e.id);});
+    if(pendingIds.length){
+      pendingIds.forEach(function(id){
+        var tr=document.querySelector('tr[data-row="'+id+'"]');
+        if(tr)tr.classList.add('pending-sync');
+      });
+    }
   }).catch(function(e){
     hideLoader();
     (els.tbody||document.getElementById('tbody')).innerHTML='<tr><td colspan="5"><div class="emp"><h3>Errore server</h3><p>'+(e&&e.message?e.message:'Controlla la connessione.')+'</p></div></td></tr>';
@@ -826,6 +838,84 @@ function drawRows(recs,highlightQuery){
 }
 
 // ───────────────────────────────────────────────────────────
+// CODA SINCRONIZZAZIONE OFFLINE
+// Persiste in localStorage le modifiche non riuscite.
+// Riprova automaticamente: ogni 30s, su evento "online", al boot.
+// ───────────────────────────────────────────────────────────
+var SYNC_QUEUE_KEY='syncQueue_v1';
+
+function syncLoadQueue(){
+  try{var raw=localStorage.getItem(SYNC_QUEUE_KEY);return raw?JSON.parse(raw):[];}catch(e){return [];}
+}
+function syncSaveQueue(q){
+  try{localStorage.setItem(SYNC_QUEUE_KEY,JSON.stringify(q));}catch(e){}
+}
+function syncEnqueue(rowId,body){
+  var q=syncLoadQueue();
+  // Dedup: tieni solo l'ultima versione per riga
+  q=q.filter(function(e){return String(e.id)!==String(rowId);});
+  q.push({id:rowId,body:body,ts:Date.now(),attempts:0});
+  syncSaveQueue(q);
+  syncRenderBadge();
+}
+function syncDequeue(rowId){
+  var q=syncLoadQueue().filter(function(e){return String(e.id)!==String(rowId);});
+  syncSaveQueue(q);
+  syncRenderBadge();
+}
+
+function syncProcess(){
+  if(typeof navigator!=='undefined'&&navigator.onLine===false)return;
+  var q=syncLoadQueue();
+  if(!q.length)return;
+  // Processa in parallelo
+  Promise.all(q.map(function(entry){
+    entry.attempts=(entry.attempts||0)+1;
+    return sbFetch('chiamate?id=eq.'+entry.id,{
+      method:'PATCH',body:entry.body,prefer:'return=minimal'
+    }).then(function(res){
+      return res.ok?{ok:true,id:entry.id}:{ok:false,id:entry.id};
+    }).catch(function(){return {ok:false,id:entry.id};});
+  })).then(function(results){
+    var failed=results.filter(function(r){return !r.ok;}).map(function(r){return String(r.id);});
+    var newQ=syncLoadQueue().filter(function(e){return failed.indexOf(String(e.id))!==-1;});
+    syncSaveQueue(newQ);
+    syncRenderBadge();
+    var ok=results.length-failed.length;
+    if(ok>0&&failed.length===0)loadRows(PAGE); // refresh elenco se tutto sincronizzato
+  });
+}
+
+function syncRenderBadge(){
+  var q=syncLoadQueue();
+  var existing=document.getElementById('syncBadge');
+  if(q.length===0){if(existing)existing.remove();return;}
+  if(!existing){
+    existing=document.createElement('div');
+    existing.id='syncBadge';
+    existing.title='Clicca per riprovare adesso';
+    existing.addEventListener('click',function(){syncProcess();});
+    document.body.appendChild(existing);
+  }
+  var offline=(typeof navigator!=='undefined'&&navigator.onLine===false);
+  existing.className='sync-badge'+(offline?' offline':'');
+  existing.innerHTML=
+    '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">'
+      +(offline
+        ?'<line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>'
+        :'<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>')
+    +'</svg>'
+    +'<span>'+(offline?'Offline · ':'')+q.length+' modific'+(q.length===1?'a':'he')+' in attesa</span>';
+}
+
+// Innesco automatico: quando torna la connessione + ogni 30s + al boot
+if(typeof window!=='undefined'){
+  window.addEventListener('online',function(){syncRenderBadge();syncProcess();});
+  window.addEventListener('offline',function(){syncRenderBadge();});
+  setInterval(syncProcess,30000);
+}
+
+// ───────────────────────────────────────────────────────────
 // AUTOSAVE: timer per riga, parte 1.5s dopo che il focus
 // lascia la riga. Cancellato se l'utente torna sulla riga.
 // ───────────────────────────────────────────────────────────
@@ -860,19 +950,44 @@ function silentAutoSave(tr,rowId){
   var tsISO=italianToISO(tsNow);if(tsISO)body.timestamp_chiamata=tsISO;
   var floppy=tr.querySelector('.isv');
   if(floppy){floppy.style.display='flex';floppy.classList.add('saving');floppy.innerHTML='<div class="spin-dark"></div>';}
-  sbFetch('chiamate?id=eq.'+rowId,{method:'PATCH',body:body,prefer:'return=minimal'}).then(function(res){
+
+  var onSuccess=function(){
     if(floppy){floppy.classList.remove('saving');floppy.innerHTML=svgFloppy();}
-    if(res.ok){
-      delete dirtyMap[rowId];
-      tr.dataset.originalTs=tsNow;
-      if(floppy)floppy.style.display='none';
-      // Pulse verde discreto come feedback visivo
-      tr.classList.add('saved-pulse');
-      setTimeout(function(){tr.classList.remove('saved-pulse');},900);
-    }
-  }).catch(function(){
-    if(floppy){floppy.classList.remove('saving');floppy.innerHTML=svgFloppy();}
-  });
+    delete dirtyMap[rowId];
+    syncDequeue(rowId);
+    tr.dataset.originalTs=tsNow;
+    if(floppy)floppy.style.display='none';
+    tr.classList.add('saved-pulse');
+    setTimeout(function(){tr.classList.remove('saved-pulse');},900);
+  };
+  var onFailure=function(){
+    // Salvataggio fallito → metti in coda per riprovare quando c'è linea
+    syncEnqueue(rowId,body);
+    if(floppy){floppy.classList.remove('saving');floppy.innerHTML=svgFloppy();floppy.style.display='none';}
+    delete dirtyMap[rowId]; // rimosso da dirtyMap perché ora è in syncQueue
+    tr.dataset.originalTs=tsNow;
+    // Indicatore visivo "in attesa di sync" sulla riga
+    tr.classList.add('pending-sync');
+  };
+
+  // Se offline, accoda subito senza tentare
+  if(typeof navigator!=='undefined'&&navigator.onLine===false){onFailure();return;}
+
+  sbFetch('chiamate?id=eq.'+rowId,{method:'PATCH',body:body,prefer:'return=minimal'})
+    .then(function(res){if(res.ok)onSuccess();else onFailure();})
+    .catch(function(){onFailure();});
+}
+
+// Costruisce il body PATCH per una riga (riusato da beforeunload)
+function buildPatchBodyFromRow(tr){
+  if(!tr)return null;
+  var po=tr.querySelector('[data-field="postazione"]')?tr.querySelector('[data-field="postazione"]').dataset.nome||'':'';
+  var de=sanitizeText((tr.querySelector('[data-field="descrizione"]')||{innerText:''}).innerText.trim());
+  var no=sanitizeText((tr.querySelector('[data-field="note"]')||{innerText:''}).innerText.trim());
+  var tsNow=getFormattedTs(tr);
+  var body={postazione:po,descrizione:de,note:no};
+  var tsISO=italianToISO(tsNow);if(tsISO)body.timestamp_chiamata=tsISO;
+  return body;
 }
 
 // ───────────────────────────────────────────────────────────
@@ -1081,22 +1196,39 @@ function saveEdit(info,floppyEl,onDone){
   if(floppyEl){floppyEl.style.display='flex';floppyEl.classList.add('saving');floppyEl.innerHTML='<div class="spin-dark"></div>';}
   var body={postazione:po,descrizione:de,note:no};
   var tsISO=italianToISO(tsNow);if(tsISO)body.timestamp_chiamata=tsISO;
+
+  var queueAndConfirm=function(){
+    syncEnqueue(String(ri),body);
+    if(floppyEl){floppyEl.classList.remove('saving');floppyEl.innerHTML=svgFloppy();floppyEl.style.display='none';}
+    delete dirtyMap[String(ri)];
+    tr.dataset.originalTs=tsNow;
+    tr.classList.add('pending-sync');
+    if(po)localStorage.setItem('lastPostazione',po);
+    fb(true,'In coda','Sei offline. La modifica verrà inviata appena torni online.');
+    if(onDone)onDone(true,true);
+  };
+
+  if(typeof navigator!=='undefined'&&navigator.onLine===false){queueAndConfirm();return;}
+
   sbFetch('chiamate?id=eq.'+ri,{method:'PATCH',body:body,prefer:'return=minimal'}).then(function(res){
     if(floppyEl){floppyEl.classList.remove('saving');floppyEl.innerHTML=svgFloppy();}
     if(res.ok){
       delete dirtyMap[String(ri)];
+      syncDequeue(String(ri));
       tr.dataset.originalTs=tsNow;
       if(floppyEl)floppyEl.style.display='none';
+      tr.classList.remove('pending-sync');
       if(po)localStorage.setItem('lastPostazione',po);
       fb(true,'Salvata','Chiamata aggiornata.');
     } else {
-      fb(false,'Errore','Salvataggio fallito.');
+      // Errore HTTP → metti in coda
+      queueAndConfirm();
+      return;
     }
     if(onDone)onDone(res.ok,false);
   }).catch(function(){
-    if(floppyEl){floppyEl.classList.remove('saving');floppyEl.innerHTML=svgFloppy();}
-    fb(false,'Errore','Server non raggiungibile.');
-    if(onDone)onDone(false,false);
+    // Errore di rete → metti in coda
+    queueAndConfirm();
   });
 }
 
