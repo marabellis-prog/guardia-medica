@@ -38,18 +38,21 @@ input,textarea,select{font:inherit;color:inherit}
 .hlogo{display:flex;align-items:center;gap:.75rem;flex:1;min-width:0}
 .hquick{display:flex;align-items:center;gap:.5rem;flex:0 0 auto}
 .hactions{display:flex;align-items:center;gap:.4rem;flex:1;justify-content:flex-end;min-width:0}
-.hquick-link{display:inline-flex;align-items:center;gap:.45rem;padding:.4rem .75rem;border:1px solid var(--bord);border-radius:var(--r2);background:var(--surface2);color:var(--tx);font-size:.85rem;font-weight:600;text-decoration:none;transition:all var(--tr);white-space:nowrap;cursor:pointer}
+.hquick-link{display:inline-flex;align-items:center;justify-content:center;gap:.55rem;padding:.5rem .9rem;min-height:44px;border:1px solid var(--bord);border-radius:var(--r2);background:var(--surface2);color:var(--tx);font-size:.9rem;font-weight:600;text-decoration:none;transition:all var(--tr);white-space:nowrap;cursor:pointer}
 .hquick-link:hover{background:var(--prl);border-color:var(--pr);color:var(--pr);transform:translateY(-1px);box-shadow:var(--sh1)}
 .hquick-link:active{transform:translateY(0)}
-.hquick-link img{width:18px;height:18px;border-radius:3px;flex-shrink:0;background:var(--surface);object-fit:contain}
-.hquick-label{font-size:.85rem}
+.hquick-link img{width:28px;height:28px;border-radius:5px;flex-shrink:0;background:var(--surface);object-fit:contain}
+.hquick-label{font-size:.9rem}
 @media(max-width:760px){
-  .hquick-link{padding:.4rem .55rem}
+  .hquick-link{padding:.4rem;min-width:48px;min-height:48px;border-radius:12px}
+  .hquick-link img{width:32px;height:32px;border-radius:6px}
   .hquick-label{display:none}
 }
 @media(max-width:380px){
-  .hdr{padding:.7rem .8rem;gap:.5rem}
-  .hquick{gap:.35rem}
+  .hdr{padding:.7rem .8rem;gap:.4rem}
+  .hquick{gap:.4rem}
+  .hquick-link{padding:.35rem;min-width:46px;min-height:46px}
+  .hquick-link img{width:30px;height:30px}
 }
 .htitle{font-family:var(--fd);font-size:clamp(1.125rem,1rem + .75vw,1.5rem)}
 .hsub{font-size:clamp(.75rem,.7rem + .25vw,.875rem);color:var(--txm);margin-top:1px}
