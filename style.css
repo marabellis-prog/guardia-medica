@@ -281,6 +281,28 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
 .trash-btn-delete{background:var(--erbg);color:var(--er)}
 .trash-btn-delete:hover{background:var(--er);color:#fff}
 
+/* Banner: nuova versione disponibile */
+.update-banner{
+  position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9200;
+  display:flex;align-items:center;gap:.75rem;
+  padding:.6rem .75rem .6rem 1rem;
+  background:var(--pr);color:#fff;
+  border-radius:99px;
+  box-shadow:var(--sh3);
+  font-size:.85rem;font-weight:600;
+  animation:updSlideDown .25s ease-out;
+}
+.update-banner button{
+  padding:.35rem .9rem;
+  background:#fff;color:var(--pr);
+  border-radius:99px;
+  font-weight:700;font-size:.8rem;
+  cursor:pointer;border:none;
+  transition:transform var(--tr);
+}
+.update-banner button:hover{transform:scale(1.05)}
+@keyframes updSlideDown{from{opacity:0;transform:translate(-50%,-12px)}to{opacity:1;transform:translate(-50%,0)}}
+
 /* Banner Annulla eliminazione: appare 7s dopo delete */
 .undo-banner{
   position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9100;
