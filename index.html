@@ -159,6 +159,14 @@
           </svg>
         </button>
 
+        <button class="ibtn-pr" id="btnExport" title="Esporta dati">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+        </button>
+
         <button class="ibtn-pr" id="btnSearch" title="Filtra e cerca">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
         </button>
@@ -407,6 +415,79 @@
     <div class="mac">
       <button class="bcan" id="btnPostDelCancel" type="button">Annulla</button>
       <button class="bconf" id="btnPostDelConfirm" type="button">Elimina</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Export -->
+<div class="mov" id="mexport">
+  <div class="mbox" style="max-width:520px;width:min(94vw,520px);text-align:left">
+    <div class="mtit" style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      Esporta chiamate
+    </div>
+    <div class="mmsg" style="text-align:left;max-width:none">
+      Filtra opzionalmente per intervallo di date e postazione, poi scegli il formato.
+    </div>
+
+    <div class="export-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-top:1rem">
+      <div class="srch-fg">
+        <label class="fl" for="exportDateFrom">Dal</label>
+        <input type="date" class="srch-inp" id="exportDateFrom">
+      </div>
+      <div class="srch-fg">
+        <label class="fl" for="exportDateTo">Al</label>
+        <input type="date" class="srch-inp" id="exportDateTo">
+      </div>
+      <div class="srch-fg" style="grid-column:1/-1">
+        <label class="fl" for="exportPost">Postazione</label>
+        <select class="srch-sel" id="exportPost">
+          <option value="">Tutte le postazioni</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="fl" style="margin:1.1rem 0 .5rem">Formato</div>
+    <div class="export-formats">
+      <label class="export-fmt">
+        <input type="radio" name="exportFmt" value="csv" checked>
+        <span class="export-fmt-card">
+          <span class="export-fmt-name">CSV</span>
+          <span class="export-fmt-desc">Apribile in Excel, Numbers, Google Sheets</span>
+        </span>
+      </label>
+      <label class="export-fmt">
+        <input type="radio" name="exportFmt" value="xlsx">
+        <span class="export-fmt-card">
+          <span class="export-fmt-name">Excel (XLSX)</span>
+          <span class="export-fmt-desc">Foglio formattato con larghezze colonna</span>
+        </span>
+      </label>
+      <label class="export-fmt">
+        <input type="radio" name="exportFmt" value="pdf">
+        <span class="export-fmt-card">
+          <span class="export-fmt-name">PDF</span>
+          <span class="export-fmt-desc">Stampabile o condivisibile (via dialog di stampa)</span>
+        </span>
+      </label>
+    </div>
+
+    <div id="exportInfo" style="display:none;margin-top:.85rem;padding:.65rem .85rem;border-radius:8px;background:var(--prl);color:var(--pr);font-size:.85rem;font-weight:500"></div>
+
+    <div class="mac" style="margin-top:1.2rem">
+      <button class="bcan" id="btnExportCancel" type="button">Annulla</button>
+      <button class="bconf" id="btnExportGo" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+          <polyline points="7 10 12 15 17 10"/>
+          <line x1="12" y1="15" x2="12" y2="3"/>
+        </svg>
+        Esporta
+      </button>
     </div>
   </div>
 </div>
