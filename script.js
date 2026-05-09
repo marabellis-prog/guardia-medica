@@ -98,13 +98,17 @@ function hideLoader(){
 
 // ───────────────────────────────────────────────────────────
 // AUTO-REFRESH: real-time multi-device sync
-// - Visibility change: ricarica all'attivazione del tab
-// - Polling 30s: rileva max(updated_at); se cambiato → banner
-// - Banner non intrusivo se ci sono modifiche dirty/modal aperto
+// - PRIMARY: Supabase Realtime (WebSocket push, sub-secondo)
+// - FALLBACK: polling 60s su max(updated_at) se Realtime fallisce
+// - Visibility change: refresh immediato al ritorno sul tab
+// - Banner non intrusivo se utente impegnato
 // ───────────────────────────────────────────────────────────
-var REFRESH_POLL_MS=30000;
+var REFRESH_POLL_MS=60000;
 var lastKnownUpdate=0;
 var refreshPollTimer=null;
+var realtimeChannel=null;
+var realtimeDebounceTimer=null;
+var REALTIME_DEBOUNCE_MS=500;
 
 function fetchLatestUpdate(){
   return fetch(SUPABASE_URL+'/rest/v1/chiamate?select=updated_at&order=updated_at.desc&limit=1',{
@@ -181,23 +185,67 @@ function showRefreshAvailableBanner(){
   document.body.appendChild(b);
 }
 
+function startPolling(){
+  if(refreshPollTimer)return;
+  refreshPollTimer=setInterval(checkForRemoteChanges,REFRESH_POLL_MS);
+}
+function stopPolling(){
+  if(refreshPollTimer){clearInterval(refreshPollTimer);refreshPollTimer=null;}
+}
+
+// Debounced trigger comune sia per Realtime che per polling
+function scheduleRefreshFromRemote(){
+  if(realtimeDebounceTimer)clearTimeout(realtimeDebounceTimer);
+  realtimeDebounceTimer=setTimeout(function(){
+    handleRemoteChanges();
+  },REALTIME_DEBOUNCE_MS);
+}
+
+function setupRealtime(){
+  loadScriptOnce('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js')
+    .then(function(){
+      if(!window.supabase||!window.supabase.createClient){
+        // Lib non caricata correttamente → fallback polling
+        startPolling();
+        return;
+      }
+      var client=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{
+        realtime:{params:{eventsPerSecond:10}}
+      });
+      realtimeChannel=client.channel('chiamate-realtime')
+        .on('postgres_changes',{event:'*',schema:'public',table:'chiamate'},function(payload){
+          // Push event ricevuto → trigger refresh con debounce
+          scheduleRefreshFromRemote();
+        })
+        .subscribe(function(status){
+          if(status==='SUBSCRIBED'){
+            // Realtime attivo: ferma il polling fallback
+            stopPolling();
+          } else if(status==='CHANNEL_ERROR'||status==='TIMED_OUT'||status==='CLOSED'){
+            // Realtime caduto: attiva polling fallback
+            startPolling();
+          }
+        });
+    })
+    .catch(function(){
+      // Errore caricamento lib: usa polling
+      startPolling();
+    });
+}
+
 function setupAutoRefresh(){
-  // Init: registra il punto di partenza
+  // Init: registra il punto di partenza per le query updated_at
   fetchLatestUpdate().then(function(ts){lastKnownUpdate=ts;});
 
-  // Polling
-  if(refreshPollTimer)clearInterval(refreshPollTimer);
-  refreshPollTimer=setInterval(checkForRemoteChanges,REFRESH_POLL_MS);
+  // Prova Realtime; se fallisce parte polling
+  setupRealtime();
 
-  // Tab focus → ricarica subito (caso classico multi-device)
+  // Tab focus → refresh immediato (caso classico multi-device)
   document.addEventListener('visibilitychange',function(){
     if(document.hidden)return;
-    // Cancella eventuale banner precedente
     var ex=document.getElementById('refreshBanner');
     if(ex)ex.remove();
-    // Se l'utente è impegnato, aspetta che finisca
     if(isUserBusy()){
-      // Solo in caso di cambiamenti remoti mostra banner
       checkForRemoteChanges();
       return;
     }
