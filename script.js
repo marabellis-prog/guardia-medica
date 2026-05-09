@@ -1,6 +1,6 @@
 // ─── BUILD VERSION (auto-aggiornato dallo script di deploy) ───
 // NON modificare manualmente: il deploy aggiorna questa stringa
-var BUILD_VERSION = '1778339285005';
+var BUILD_VERSION = '1778339350417';
 
 var POST=[],PAGE=1,PROW=null,DROW=null,DELEL=null;
 var dirtyMap={};
