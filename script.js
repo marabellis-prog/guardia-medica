@@ -279,6 +279,9 @@ function renderUserMenu(){
 function renderAdminBadge(){
   var b = document.getElementById('btnAdminOpen');
   if(b) b.style.display = '';
+  // Anche la gestione postazioni è admin-only (postazioni sono condivise)
+  var bp = document.getElementById('btnGestPost');
+  if(bp) bp.style.display = '';
 }
 
 // ───────────────────────────────────────────────────────────
@@ -809,7 +812,6 @@ document.addEventListener('DOMContentLoaded',function(){
   var selPost=document.getElementById('selPost');
   var btnNo=document.getElementById('btnNo');
   var btnSi=document.getElementById('btnSi');
-  var btnRefresh=document.getElementById('btnRefresh');
   var btnSearch=document.getElementById('btnSearch');
   var btnDoSearch=document.getElementById('btnDoSearch');
   var btnResetSearch=document.getElementById('btnResetSearch');
@@ -823,14 +825,6 @@ document.addEventListener('DOMContentLoaded',function(){
   });
   if(btnNo)btnNo.addEventListener('click',function(){chiudi('mcnf');});
   if(btnSi)btnSi.addEventListener('click',confCompleta);
-
-  if(btnRefresh){
-    btnRefresh.addEventListener('click',function(){
-      currentFilters=null;
-      resetSearchUI();
-      loadRows(1);
-    });
-  }
 
   if(btnSearch){
     btnSearch.addEventListener('click',function(){
@@ -905,29 +899,6 @@ document.addEventListener('DOMContentLoaded',function(){
       loadRows(1);
     });
   }
-
-  // Sort — con Supabase il sort è automatico, i pulsanti fanno refresh
-  var btnSort=document.getElementById('btnSort');
-  var btnSortLite=document.getElementById('btnSortLite');
-  var btnSortFull=document.getElementById('btnSortFull');
-  var btnSortCancel=document.getElementById('btnSortCancel');
-
-  if(btnSort)btnSort.addEventListener('click',function(){apri('msort');});
-  if(btnSortLite){
-    btnSortLite.addEventListener('click',function(){
-      chiudi('msort');
-      showSortBadge(true,'Dati aggiornati.');
-      loadRows(PAGE);
-    });
-  }
-  if(btnSortFull){
-    btnSortFull.addEventListener('click',function(){
-      chiudi('msort');
-      showSortBadge(true,'Dati aggiornati.');
-      loadRows(1);
-    });
-  }
-  if(btnSortCancel)btnSortCancel.addEventListener('click',function(){chiudi('msort');});
 
   // Filtro incompleti
   var btnInc=document.getElementById('btnIncomplete');
@@ -2682,7 +2653,6 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mcnf'))chiudi('mcnf');
   if(e.target===document.getElementById('munsav1'))chiudi('munsav1');
   if(e.target===document.getElementById('munsavN'))chiudi('munsavN');
-  if(e.target===document.getElementById('msort'))chiudi('msort');
   if(e.target===document.getElementById('mdel'))chiudi('mdel');
   if(e.target===document.getElementById('mpost'))chiudi('mpost');
   if(e.target===document.getElementById('mpostDel'))chiudi('mpostDel');
