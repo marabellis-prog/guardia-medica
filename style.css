@@ -197,6 +197,45 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
   .twrap tbody tr.pending-sync{box-shadow:inset 0 0 0 1px var(--wa,#d4a017),inset 4px 0 0 0 var(--wa,#d4a017)}
 }
 
+/* Banner Annulla eliminazione: appare 7s dopo delete */
+.undo-banner{
+  position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:9100;
+  display:flex;align-items:center;gap:.6rem;
+  padding:.7rem .55rem .7rem 1rem;
+  background:var(--surface);
+  border:1px solid var(--bord);
+  border-radius:12px;
+  box-shadow:var(--sh3);
+  font-size:.9rem;color:var(--tx);font-weight:500;
+  animation:undoSlideUp .25s ease-out;
+  overflow:hidden;
+  max-width:calc(100vw - 32px);
+}
+.undo-banner.fade-out{animation:undoFadeOut .3s ease-in forwards}
+.undo-banner svg{flex-shrink:0;color:var(--er)}
+.undo-banner .undo-msg{white-space:nowrap}
+.undo-btn{
+  margin-left:.25rem;padding:.4rem .9rem;
+  background:var(--pr);color:#fff;border-radius:8px;
+  font-weight:600;font-size:.85rem;cursor:pointer;
+  transition:background var(--tr);
+  border:none;
+}
+.undo-btn:hover{background:var(--prh)}
+.undo-progress{
+  position:absolute;bottom:0;left:0;
+  height:2px;background:var(--pr);width:100%;
+  animation:undoProgress 7s linear forwards;
+}
+@keyframes undoSlideUp{from{opacity:0;transform:translate(-50%,12px)}to{opacity:1;transform:translate(-50%,0)}}
+@keyframes undoFadeOut{to{opacity:0;transform:translate(-50%,12px)}}
+@keyframes undoProgress{to{width:0}}
+@media(max-width:480px){
+  .undo-banner{left:8px;right:8px;transform:none;max-width:none}
+  @keyframes undoSlideUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+  @keyframes undoFadeOut{to{opacity:0;transform:translateY(12px)}}
+}
+
 /* Badge fluttuante: modifiche in attesa di sincronizzazione */
 .sync-badge{
   position:fixed;bottom:16px;right:16px;z-index:9000;
