@@ -302,16 +302,18 @@ document.addEventListener('DOMContentLoaded',function(){
   var btnPhoneCancel=document.getElementById('btnPhoneCancel');
   var btnPhoneClear=document.getElementById('btnPhoneClear');
   var btnPhoneAnon=document.getElementById('btnPhoneAnon');
-  if(btnPhoneCancel)btnPhoneCancel.addEventListener('click',function(){chiudi('mphone');});
+  var btnPhoneEdit=document.getElementById('btnPhoneEdit');
+  if(btnPhoneCancel)btnPhoneCancel.addEventListener('click',function(){chiudi('mphone');phoneModalSpan=null;});
   if(btnPhoneClear)btnPhoneClear.addEventListener('click',function(){
-    chiudi('mphone');
+    chiudi('mphone');phoneModalSpan=null;
     window.location.href='tel:'+phoneModalNumber;
   });
   if(btnPhoneAnon)btnPhoneAnon.addEventListener('click',function(){
-    chiudi('mphone');
+    chiudi('mphone');phoneModalSpan=null;
     // Codifico #31# come %2331%23 (compatibile iOS/Android)
     window.location.href='tel:%2331%23'+phoneModalNumber;
   });
+  if(btnPhoneEdit)btnPhoneEdit.addEventListener('click',editPhoneInline);
 
   // Delete chiamata
   var btnDelCancel=document.getElementById('btnDelCancel');
@@ -1005,6 +1007,8 @@ function silentAutoSave(tr,rowId){
     if(floppy)floppy.style.display='none';
     tr.classList.add('saved-pulse');
     setTimeout(function(){tr.classList.remove('saved-pulse');},900);
+    // Ri-rileva eventuali numeri nuovi inseriti nella cella
+    relinkifyRow(tr);
   };
   var onFailure=function(){
     // Salvataggio fallito → metti in coda per riprovare quando c'è linea
@@ -1063,7 +1067,7 @@ function setupTableDelegation(){
       if(document.activeElement&&typeof document.activeElement.blur==='function'){
         try{document.activeElement.blur();}catch(_e){}
       }
-      openPhoneModal(ph.dataset.phone);
+      openPhoneModal(ph.dataset.phone,ph);
       return;
     }
     var iho=t.closest('.iho');
@@ -1281,6 +1285,7 @@ function saveEdit(info,floppyEl,onDone){
       if(floppyEl)floppyEl.style.display='none';
       tr.classList.remove('pending-sync');
       if(po)localStorage.setItem('lastPostazione',po);
+      relinkifyRow(tr);
       fb(true,'Salvata','Chiamata aggiornata.');
     } else {
       // Errore HTTP → metti in coda
@@ -2255,14 +2260,57 @@ function fmtPhoneDisplay(digits){
 }
 
 var phoneModalNumber='';
-function openPhoneModal(num){
+var phoneModalSpan=null;   // span .ph-link cliccato (per la funzione "Modifica")
+
+function openPhoneModal(num,spanEl){
   // Forza blur dell'elemento attivo per chiudere la tastiera mobile
-  // (se è stata aperta dal focus al contenteditable padre)
   if(document.activeElement&&typeof document.activeElement.blur==='function'){
     try{document.activeElement.blur();}catch(e){}
   }
   phoneModalNumber=num;
+  phoneModalSpan=spanEl||null;
   var el=document.getElementById('mphoneNum');
   if(el)el.textContent=fmtPhoneDisplay(num);
   apri('mphone');
+}
+
+// Trasforma il .ph-link in testo modificabile e ci porta il cursore alla fine
+function editPhoneInline(){
+  chiudi('mphone');
+  if(!phoneModalSpan||!phoneModalSpan.parentNode)return;
+  var span=phoneModalSpan;phoneModalSpan=null;
+  var text=span.textContent||'';
+  var parent=span.parentNode;
+  var textNode=document.createTextNode(text);
+  parent.replaceChild(textNode,span);
+
+  // Trova la cella contenteditable e marca dirty
+  var cell=parent.closest('[contenteditable="true"]');
+  if(!cell)return;
+  var tr=cell.closest('tr');
+  if(tr)markDirty(tr);
+
+  // Focus sulla cella e cursore alla fine del testo appena inserito
+  cell.focus();
+  try{
+    var range=document.createRange();
+    range.setStartAfter(textNode);
+    range.collapse(true);
+    var sel=window.getSelection();
+    sel.removeAllRanges();sel.addRange(range);
+  }catch(e){}
+}
+
+// Riapplica linkifyPhones a descrizione/note di una riga, senza disturbare
+// celle attualmente in editing dall'utente
+function relinkifyRow(tr){
+  if(!tr)return;
+  ['[data-field="descrizione"]','[data-field="note"]'].forEach(function(sel){
+    var cell=tr.querySelector(sel);
+    if(!cell)return;
+    if(document.activeElement===cell)return; // l'utente sta editando, non toccare
+    var raw=cell.innerText||'';
+    var newHtml=linkifyPhones(esc(raw));
+    if(newHtml!==cell.innerHTML)cell.innerHTML=newHtml;
+  });
 }
