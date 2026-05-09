@@ -1,3 +1,7 @@
+// ─── BUILD VERSION (auto-aggiornato dallo script di deploy) ───
+// NON modificare manualmente: il deploy aggiorna questa stringa
+var BUILD_VERSION = '1778339201245';
+
 var POST=[],PAGE=1,PROW=null,DROW=null,DELEL=null;
 var dirtyMap={};
 var warnOpen=false;
@@ -201,17 +205,25 @@ function scheduleRefreshFromRemote(){
   },REALTIME_DEBOUNCE_MS);
 }
 
-function setupRealtime(){
-  loadScriptOnce('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js')
+// Client Supabase condiviso (lazy, una sola istanza per tutta la pagina)
+var supabaseClientPromise=null;
+function getSupabaseClient(){
+  if(supabaseClientPromise)return supabaseClientPromise;
+  supabaseClientPromise=loadScriptOnce('https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js')
     .then(function(){
       if(!window.supabase||!window.supabase.createClient){
-        // Lib non caricata correttamente → fallback polling
-        startPolling();
-        return;
+        throw new Error('Supabase JS client non disponibile');
       }
-      var client=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{
+      return window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY,{
         realtime:{params:{eventsPerSecond:10}}
       });
+    });
+  return supabaseClientPromise;
+}
+
+function setupRealtime(){
+  getSupabaseClient()
+    .then(function(client){
       realtimeChannel=client.channel('chiamate-realtime')
         .on('postgres_changes',{event:'*',schema:'public',table:'chiamate'},function(payload){
           // Push event ricevuto → trigger refresh con debounce
@@ -231,6 +243,159 @@ function setupRealtime(){
       // Errore caricamento lib: usa polling
       startPolling();
     });
+}
+
+// ───────────────────────────────────────────────────────────
+// VERSION WATCHER: notifica quando esce un nuovo deploy
+// - Si appoggia al canale Supabase Realtime su tabella app_version
+// - Quando il ts cambia → polling sul fresh script.js
+// - Confronto BUILD_VERSION corrente vs quella nel file fresco
+// - Quando matcha → mostra badge in NavBar
+// - Click badge → cleanup completo + reload con cache buster
+// ───────────────────────────────────────────────────────────
+var versionPollHandle=null;
+
+function checkFreshAvailable(){
+  // Fetch dello script.js con cache buster (URL diverso → SW cache miss)
+  // ⚠️ Importante: cache:'reload' bypassa anche la HTTP cache locale
+  return fetch('./script.js?_check='+Date.now(),{
+    cache:'reload',
+    credentials:'same-origin',
+    headers:{'Cache-Control':'no-cache, no-store'}
+  }).then(function(r){
+    if(!r.ok)return null;
+    return r.text();
+  }).then(function(text){
+    if(!text)return false;
+    // Estrai BUILD_VERSION dal file fresco
+    var m=text.match(/var\s+BUILD_VERSION\s*=\s*['"]([^'"]+)['"]/);
+    if(!m)return false;
+    var freshVersion=m[1];
+    // Se diverso dalla versione che sto running → c'è una nuova versione
+    return freshVersion!==BUILD_VERSION;
+  }).catch(function(){return false;});
+}
+
+function startVersionPolling(){
+  if(versionPollHandle!==null)return;
+  var tries=0;
+  var tick=function(){
+    tries++;
+    checkFreshAvailable().then(function(isFresh){
+      if(isFresh){
+        clearInterval(versionPollHandle);versionPollHandle=null;
+        showUpdateBadge();
+        return;
+      }
+      // Safety net: dopo 60 tentativi (10 min) mostra comunque
+      // (l'utente cliccando farà fetch con ?_r=… che forza fresh dall'origin)
+      if(tries>=60){
+        clearInterval(versionPollHandle);versionPollHandle=null;
+        showUpdateBadge();
+      }
+    });
+  };
+  tick();
+  versionPollHandle=setInterval(tick,10000);
+}
+
+function setupVersionWatcher(){
+  getSupabaseClient().then(function(client){
+    var lastSeenTs=null;
+
+    // Registra punto di partenza
+    client.from('app_version').select('ts').eq('id',1).single()
+      .then(function(res){
+        if(res&&res.data)lastSeenTs=String(res.data.ts);
+      });
+
+    // Sottoscrivi al canale dedicato
+    client.channel('app-version-watch')
+      .on('postgres_changes',{
+        event:'UPDATE',schema:'public',table:'app_version',filter:'id=eq.1'
+      },function(payload){
+        var newTs=String(payload.new.ts);
+        if(lastSeenTs&&newTs!==lastSeenTs)startVersionPolling();
+        lastSeenTs=newTs;
+      })
+      .subscribe();
+
+    // Anche su visibility change controlla (ricopre il caso "tab in background")
+    document.addEventListener('visibilitychange',function(){
+      if(document.hidden)return;
+      client.from('app_version').select('ts').eq('id',1).single()
+        .then(function(res){
+          if(!res||!res.data)return;
+          var remoteTs=String(res.data.ts);
+          if(lastSeenTs&&remoteTs!==lastSeenTs)startVersionPolling();
+          lastSeenTs=remoteTs;
+        });
+    });
+  }).catch(function(){
+    // Senza Supabase JS niente notifiche real-time, ma il SW continuerà
+    // a aggiornare la cache in background. Niente di rotto.
+  });
+}
+
+function showUpdateBadge(){
+  if(document.getElementById('updateBadge'))return;
+  // Rimuovi banner SW vecchio se presente
+  var old=document.getElementById('updateBanner');if(old)old.remove();
+
+  var badge=document.createElement('button');
+  badge.id='updateBadge';
+  badge.type='button';
+  badge.className='update-badge';
+  badge.title='Clicca per ricaricare con la versione aggiornata';
+  badge.innerHTML=
+    '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" class="update-badge-spin">'
+      +'<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>'
+      +'<path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>'
+    +'</svg>'
+    +'<span>Aggiornamento disponibile</span>';
+  badge.addEventListener('click',applyVersionUpdate);
+
+  // Inserisci nella NavBar prima delle azioni esistenti
+  var hactions=document.querySelector('.hactions');
+  if(hactions)hactions.insertBefore(badge,hactions.firstChild);
+  else document.body.appendChild(badge);
+}
+
+function applyVersionUpdate(){
+  // 1. Cleanup di TUTTE le caches (SW + HTTP cache via API)
+  var cleanupPromises=[];
+  if(window.caches){
+    cleanupPromises.push(
+      caches.keys().then(function(keys){
+        return Promise.all(keys.map(function(k){return caches.delete(k);}));
+      }).catch(function(){})
+    );
+  }
+  // 2. Unregister di TUTTI i service worker
+  if('serviceWorker' in navigator){
+    cleanupPromises.push(
+      navigator.serviceWorker.getRegistrations().then(function(regs){
+        return Promise.all(regs.map(function(r){return r.unregister();}));
+      }).catch(function(){})
+    );
+  }
+  // Salva eventuali dirty edits prima di ricaricare
+  if(typeof saveAllDirtySilent==='function'&&Object.keys(dirtyMap||{}).length>0){
+    cleanupPromises.push(new Promise(function(resolve){saveAllDirtySilent(resolve);}));
+  }
+
+  Promise.all(cleanupPromises).then(function(){
+    var reloadUrl=window.location.pathname+'?_r='+Date.now()+window.location.hash;
+    // Pre-fetch con cache:'reload' per ripopolare la disk cache con HTML fresco
+    // (alcuni edge case CDN servono HTML stale anche con query string nuova)
+    fetch(reloadUrl,{
+      cache:'reload',
+      credentials:'same-origin',
+      headers:{'Cache-Control':'no-cache, no-store, must-revalidate'}
+    }).then(function(r){return r.text();})
+      .then(function(){window.location.replace(reloadUrl);})
+      .catch(function(){window.location.replace(reloadUrl);});
+  });
 }
 
 function setupAutoRefresh(){
@@ -259,34 +424,11 @@ function setupAutoRefresh(){
 function registerServiceWorker(){
   if(!('serviceWorker' in navigator))return;
   // Differisce la registrazione: non bloccare il primo render
+  // Nota: la notifica di nuova versione è gestita dal version watcher
+  // (più affidabile, push esplicito vs lifecycle SW)
   window.addEventListener('load',function(){
-    navigator.serviceWorker.register('./sw.js').then(function(reg){
-      // Quando il SW viene aggiornato, mostra un piccolo banner
-      if(reg.waiting){showUpdateAvailable(reg);return;}
-      reg.addEventListener('updatefound',function(){
-        var nw=reg.installing;
-        if(!nw)return;
-        nw.addEventListener('statechange',function(){
-          if(nw.state==='installed'&&navigator.serviceWorker.controller){
-            showUpdateAvailable(reg);
-          }
-        });
-      });
-    }).catch(function(){/* SW non critico, l'app funziona comunque */});
+    navigator.serviceWorker.register('./sw.js').catch(function(){/* SW non critico */});
   });
-}
-
-function showUpdateAvailable(reg){
-  if(document.getElementById('updateBanner'))return;
-  var b=document.createElement('div');
-  b.id='updateBanner';
-  b.className='update-banner';
-  b.innerHTML='<span>Nuova versione disponibile</span><button type="button">Aggiorna</button>';
-  b.querySelector('button').addEventListener('click',function(){
-    if(reg&&reg.waiting)reg.waiting.postMessage({type:'SKIP_WAITING'});
-    setTimeout(function(){window.location.reload();},150);
-  });
-  document.body.appendChild(b);
 }
 
 // Gestisce ?action=new / ?action=trash dai shortcut PWA
@@ -347,6 +489,7 @@ document.addEventListener('DOMContentLoaded',function(){
   handleShortcutAction();
   loadPost();
   setupAutoRefresh();
+  setupVersionWatcher();
 
   var btnAdd=document.getElementById('btnAdd');
   var btnSave=document.getElementById('btnSave');
