@@ -1,6 +1,7 @@
-// ─── BUILD VERSION (auto-aggiornato dallo script di deploy) ───
-// NON modificare manualmente: il deploy aggiorna questa stringa
+// ─── BUILD VERSION + SHA (auto-aggiornati dal workflow) ───
+// NON modificare manualmente: il workflow li riscrive ad ogni deploy
 var BUILD_VERSION = '1778341017866';
+var BUILD_SHA = 'dev';
 
 var POST=[],PAGE=1,PROW=null,DROW=null,DELEL=null;
 var dirtyMap={};
@@ -496,6 +497,9 @@ function setupQuickLinks(){
 document.addEventListener('DOMContentLoaded',function(){
 
   initEls();
+  // Mostra il SHA del deploy nel sottotitolo (per debug visivo)
+  var hsub=document.querySelector('.hsub');
+  if(hsub)hsub.innerHTML='Registro Chiamate <span class="hsub-ver" title="Build '+esc(BUILD_VERSION)+'">v'+esc(BUILD_SHA)+'</span>';
   setupTableDelegation();
   setupQuickLinks();
   registerServiceWorker();
