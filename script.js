@@ -134,7 +134,12 @@ async function checkWhitelist(client, email){
   var emailLower = String(email||'').toLowerCase();
   if(!emailLower) return null;
   var res = await client.from('users_whitelist').select('id,email,full_name,role,protected').ilike('email', emailLower).limit(1);
-  if(res.error) throw res.error;
+  if(res.error){
+    try{console.error('checkWhitelist error:', JSON.stringify(res.error));}catch(_){}
+    var msg = res.error.message || 'errore sconosciuto';
+    if(res.error.code) msg += ' (code: '+res.error.code+')';
+    throw new Error(msg);
+  }
   if(!res.data || !res.data.length) return null;
   return res.data[0];
 }
@@ -178,7 +183,7 @@ async function setupAuth(){
   var entry;
   try { entry = await checkWhitelist(client, email); }
   catch(e){
-    authShowOverlay('Errore verifica autorizzazioni. Riprova fra poco.');
+    authShowOverlay('Errore verifica autorizzazioni: '+(e.message||e));
     return;
   }
   if(!entry){
