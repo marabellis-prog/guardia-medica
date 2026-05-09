@@ -97,6 +97,115 @@ function hideLoader(){
 // ═══════════════════════════════════════════════════════════════════
 
 // ───────────────────────────────────────────────────────────
+// AUTO-REFRESH: real-time multi-device sync
+// - Visibility change: ricarica all'attivazione del tab
+// - Polling 30s: rileva max(updated_at); se cambiato → banner
+// - Banner non intrusivo se ci sono modifiche dirty/modal aperto
+// ───────────────────────────────────────────────────────────
+var REFRESH_POLL_MS=30000;
+var lastKnownUpdate=0;
+var refreshPollTimer=null;
+
+function fetchLatestUpdate(){
+  return fetch(SUPABASE_URL+'/rest/v1/chiamate?select=updated_at&order=updated_at.desc&limit=1',{
+    headers:{
+      'apikey':SUPABASE_ANON_KEY,
+      'Authorization':'Bearer '+SUPABASE_ANON_KEY
+    }
+  }).then(function(r){return r.json();}).then(function(data){
+    if(!data||!data.length||!data[0].updated_at)return 0;
+    return new Date(data[0].updated_at).getTime();
+  }).catch(function(){return 0;});
+}
+
+function isAnyModalOpen(){
+  return !!document.querySelector('.mov.open');
+}
+
+function isUserBusy(){
+  if(Object.keys(dirtyMap).length>0)return true;
+  if(isAnyModalOpen())return true;
+  // Se l'utente sta scrivendo nel form
+  var ae=document.activeElement;
+  if(ae&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.isContentEditable))return true;
+  return false;
+}
+
+function checkForRemoteChanges(){
+  if(document.hidden)return;
+  fetchLatestUpdate().then(function(ts){
+    if(!ts)return;
+    if(!lastKnownUpdate){lastKnownUpdate=ts;return;}
+    if(ts>lastKnownUpdate){
+      handleRemoteChanges();
+    }
+  });
+}
+
+function handleRemoteChanges(){
+  if(isUserBusy()){
+    showRefreshAvailableBanner();
+    return;
+  }
+  // Auto-refresh silenzioso
+  refreshAndUpdateMark();
+}
+
+function refreshAndUpdateMark(){
+  loadRows(PAGE);
+  // Aggiorna mark dopo che la query è andata a buon fine
+  fetchLatestUpdate().then(function(ts){if(ts)lastKnownUpdate=ts;});
+}
+
+function showRefreshAvailableBanner(){
+  if(document.getElementById('refreshBanner'))return;
+  var b=document.createElement('div');
+  b.id='refreshBanner';
+  b.className='refresh-banner';
+  b.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">'
+    +'<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>'
+    +'</svg><span>Nuovi dati disponibili</span><button type="button">Aggiorna</button>';
+  b.querySelector('button').addEventListener('click',function(){
+    b.remove();
+    // Salva eventuali dirty in coda prima di ricaricare per non perderle
+    if(Object.keys(dirtyMap).length>0){
+      saveAllDirtySilent(function(){refreshAndUpdateMark();});
+    } else {
+      refreshAndUpdateMark();
+    }
+  });
+  // Anche click su X dello SVG = aggiorna; tap intera barra
+  b.addEventListener('click',function(e){
+    if(e.target.tagName==='BUTTON')return; // gestito sopra
+  });
+  document.body.appendChild(b);
+}
+
+function setupAutoRefresh(){
+  // Init: registra il punto di partenza
+  fetchLatestUpdate().then(function(ts){lastKnownUpdate=ts;});
+
+  // Polling
+  if(refreshPollTimer)clearInterval(refreshPollTimer);
+  refreshPollTimer=setInterval(checkForRemoteChanges,REFRESH_POLL_MS);
+
+  // Tab focus → ricarica subito (caso classico multi-device)
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden)return;
+    // Cancella eventuale banner precedente
+    var ex=document.getElementById('refreshBanner');
+    if(ex)ex.remove();
+    // Se l'utente è impegnato, aspetta che finisca
+    if(isUserBusy()){
+      // Solo in caso di cambiamenti remoti mostra banner
+      checkForRemoteChanges();
+      return;
+    }
+    refreshAndUpdateMark();
+  });
+}
+
+// ───────────────────────────────────────────────────────────
 // SERVICE WORKER + SHORTCUT URL HANDLER
 // ───────────────────────────────────────────────────────────
 function registerServiceWorker(){
@@ -189,6 +298,7 @@ document.addEventListener('DOMContentLoaded',function(){
   registerServiceWorker();
   handleShortcutAction();
   loadPost();
+  setupAutoRefresh();
 
   var btnAdd=document.getElementById('btnAdd');
   var btnSave=document.getElementById('btnSave');
@@ -1126,6 +1236,8 @@ function silentAutoSave(tr,rowId){
     setTimeout(function(){tr.classList.remove('saved-pulse');},900);
     // Ri-rileva eventuali numeri nuovi inseriti nella cella
     relinkifyRow(tr);
+    // Aggiorna lastKnownUpdate per non triggerare banner per modifiche nostre
+    fetchLatestUpdate().then(function(ts){if(ts)lastKnownUpdate=ts;});
   };
   var onFailure=function(){
     // Salvataggio fallito → metti in coda per riprovare quando c'è linea
@@ -1403,6 +1515,7 @@ function saveEdit(info,floppyEl,onDone){
       tr.classList.remove('pending-sync');
       if(po)localStorage.setItem('lastPostazione',po);
       relinkifyRow(tr);
+      fetchLatestUpdate().then(function(ts){if(ts)lastKnownUpdate=ts;});
       fb(true,'Salvata','Chiamata aggiornata.');
     } else {
       // Errore HTTP → metti in coda
