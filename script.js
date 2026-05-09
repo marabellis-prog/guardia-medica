@@ -500,7 +500,7 @@ function searchChiamate(filters){
   searchAbortController=new AbortController();
   var sig=searchAbortController.signal;
 
-  var params='chiamate?select=*';
+  var params='chiamate?select=*&deleted_at=is.null';
   if(filters.dateFrom){
     var df=new Date(filters.dateFrom);df.setHours(0,0,0,0);
     params+='&timestamp_chiamata=gte.'+df.toISOString();
@@ -750,7 +750,7 @@ function loadRows(pg){
   tb.innerHTML='<tr><td><div class="sk" style="width:30px;height:30px;margin:0 auto;border-radius:6px"></div></td><td><div class="sk" style="width:24px;height:12px"></div></td><td><div class="sk" style="width:100px;height:12px"></div></td><td><div class="sk" style="width:85%;height:12px"></div></td><td><div class="sk" style="width:75%;height:12px"></div></td></tr>'.repeat(3);
 
   var offset=(pg-1)*CURRENT_PAGE_SIZE;
-  var params='chiamate?select=*';
+  var params='chiamate?select=*&deleted_at=is.null';
   if(showIncompleteOnly){
     params+='&completato=eq.false&order=timestamp_chiamata.desc';
   } else {
@@ -1317,23 +1317,82 @@ function startDelete(rowIndex,desc,iconEl){
 function confDelete(){
   chiudi('mdel');if(!DROW)return;
   var ri=DROW;DROW=null;
-  var iconEl=DELEL;DELEL=null;
-  if(iconEl){
-    iconEl.style.pointerEvents='none';
-    iconEl.innerHTML='<div class="spin" style="width:13px;height:13px;border-width:2px;border-color:rgba(255,80,80,.25);border-top-color:var(--er,#c0392b);flex-shrink:0"></div>';
+  DELEL=null;
+  var deletedAtISO=new Date().toISOString();
+  var body={deleted_at:deletedAtISO};
+
+  // UI ottimistica: nascondi subito la riga
+  var trEl=document.querySelector('tr[data-row="'+ri+'"]');
+  if(trEl)trEl.style.display='none';
+
+  // Aggiorna conteggio nell'info bar al volo
+  var li=els.linfo||document.getElementById('linfo');
+  if(li){
+    var m=(li.textContent||'').match(/^(\d+)/);
+    if(m){var n=parseInt(m[1],10)-1;if(n<0)n=0;li.textContent=li.textContent.replace(/^\d+/,String(n));}
   }
-  sbFetch('chiamate?id=eq.'+ri,{method:'DELETE'}).then(function(res){
-    if(res.ok){
-      fb(true,'Eliminata','Record rimosso.');
+
+  // Banner Annulla per 7 secondi
+  showUndoBanner(ri);
+
+  // Se offline, accoda
+  if(typeof navigator!=='undefined'&&navigator.onLine===false){
+    syncEnqueue(String(ri),body);
+    return;
+  }
+
+  sbFetch('chiamate?id=eq.'+ri,{method:'PATCH',body:body,prefer:'return=minimal'}).then(function(res){
+    if(!res.ok)syncEnqueue(String(ri),body);
+  }).catch(function(){syncEnqueue(String(ri),body);});
+}
+
+function showUndoBanner(rowId){
+  var existing=document.getElementById('undoBanner');
+  if(existing)existing.remove();
+
+  var banner=document.createElement('div');
+  banner.id='undoBanner';
+  banner.className='undo-banner';
+  banner.innerHTML=
+    '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+      +'<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>'
+    +'</svg>'
+    +'<span class="undo-msg">Chiamata eliminata</span>'
+    +'<button type="button" class="undo-btn">Annulla</button>'
+    +'<div class="undo-progress"></div>';
+  document.body.appendChild(banner);
+
+  var dismissed=false;
+  var btn=banner.querySelector('.undo-btn');
+
+  btn.addEventListener('click',function(){
+    dismissed=true;
+    // Rimuovi eventuale entry in coda (se l'eliminazione era stata accodata)
+    syncDequeue(String(rowId));
+    // Ripristina: deleted_at = NULL
+    var restoreBody={deleted_at:null};
+    if(typeof navigator!=='undefined'&&navigator.onLine===false){
+      syncEnqueue(String(rowId),restoreBody);
+      banner.remove();
+      fb(true,'Ripristinata (offline)','Verrà ripristinata appena online.');
       loadRows(PAGE);
-    } else {
-      if(iconEl){iconEl.style.pointerEvents='';iconEl.innerHTML=svgTrash();}
-      fb(false,'Errore','Eliminazione fallita.');
+      return;
     }
-  }).catch(function(){
-    if(iconEl){iconEl.style.pointerEvents='';iconEl.innerHTML=svgTrash();}
-    fb(false,'Errore','Server non raggiungibile.');
+    sbFetch('chiamate?id=eq.'+rowId,{method:'PATCH',body:restoreBody,prefer:'return=minimal'}).then(function(res){
+      if(res.ok){fb(true,'Ripristinata','Chiamata ripristinata.');loadRows(PAGE);}
+      else{syncEnqueue(String(rowId),restoreBody);loadRows(PAGE);}
+    }).catch(function(){
+      syncEnqueue(String(rowId),restoreBody);loadRows(PAGE);
+    });
+    banner.remove();
   });
+
+  // Auto-dismiss dopo 7 secondi
+  setTimeout(function(){
+    if(dismissed)return;
+    banner.classList.add('fade-out');
+    setTimeout(function(){if(banner.parentNode)banner.remove();},300);
+  },7000);
 }
 
 
@@ -1514,9 +1573,9 @@ function doSalvaPostazioni(dati){
 
   var trulyDeleted=Object.keys(oldMap).filter(function(n){return !nomiNuovi[n]&&!renameMap[n];});
 
-  // STEP 1 — verifica postazioni eliminate non in uso (parallelo)
+  // STEP 1 — verifica postazioni eliminate non in uso (parallelo, solo chiamate non soft-deleted)
   return Promise.all(trulyDeleted.map(function(nome){
-    return sbFetch('chiamate?postazione=eq.'+encodeURIComponent(nome)+'&select=id&limit=1')
+    return sbFetch('chiamate?postazione=eq.'+encodeURIComponent(nome)+'&deleted_at=is.null&select=id&limit=1')
       .then(function(res){return res.json();})
       .then(function(data){
         if(data.length>0)throw new Error('Non puoi eliminare "'+nome+'": usata in chiamate.');
