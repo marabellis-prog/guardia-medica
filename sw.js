@@ -4,7 +4,7 @@
 //            network-only per API Supabase (gestita lato app)
 // ═══════════════════════════════════════════════════════════
 
-var CACHE_NAME = 'guardia-medica-v1';
+var CACHE_NAME = 'guardia-medica-v2';
 var APP_SHELL = [
   './',
   './index.html',
@@ -72,6 +72,15 @@ self.addEventListener('fetch', function(event) {
     event.respondWith(staleWhileRevalidate(event.request));
     return;
   }
+
+  // Supabase JS client (per Realtime) → cache-first
+  if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.indexOf('supabase-js') !== -1) {
+    event.respondWith(staleWhileRevalidate(event.request));
+    return;
+  }
+
+  // Supabase Realtime WebSocket → mai toccare (è WS, non HTTP)
+  if (url.protocol === 'wss:' || url.protocol === 'ws:') return;
 
   // App shell e tutto il resto della stessa origine → stale-while-revalidate
   if (url.origin === self.location.origin) {
