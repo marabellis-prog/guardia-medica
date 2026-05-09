@@ -77,6 +77,36 @@
   <div class="pl-msg" id="pl-msg">Caricamento in corso…</div>
 </div>
 
+<!-- Schermata login (mostrata se non autenticato) -->
+<div id="authOverlay" class="auth-overlay" style="display:none">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <svg width="56" height="56" viewBox="0 0 32 32" fill="none">
+        <rect width="32" height="32" rx="8" fill="#2e7d5e"/>
+        <line x1="16" y1="6" x2="16" y2="27" stroke="white" stroke-width="2" stroke-linecap="round"/>
+        <circle cx="16" cy="6" r="2" fill="white"/>
+        <path d="M16 10 C12 7 7 8 8 11 C9 13 13 12 16 11" fill="white" opacity="0.95"/>
+        <path d="M16 10 C20 7 25 8 24 11 C23 13 19 12 16 11" fill="white" opacity="0.95"/>
+        <path d="M14 12 C11 14 13 16 14 18 C15 20 12 22 13 24 C14 26 15 26 16 26" stroke="white" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+        <path d="M18 12 C21 14 19 16 18 18 C17 20 20 22 19 24 C18 26 17 26 16 26" stroke="white" stroke-width="1.6" fill="none" stroke-linecap="round"/>
+      </svg>
+    </div>
+    <div class="auth-title">Guardia Medica</div>
+    <div class="auth-sub">Registro Chiamate · accesso riservato</div>
+    <button type="button" id="btnAuthGoogle" class="auth-google-btn">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true">
+        <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8c-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C12.955 4 4 12.955 4 24s8.955 20 20 20s20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
+        <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4C16.318 4 9.656 8.337 6.306 14.691z"/>
+        <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0 1 24 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/>
+        <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 0 1-4.087 5.571l.003-.002l6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/>
+      </svg>
+      <span>Accedi con Google</span>
+    </button>
+    <div id="authError" class="auth-error" style="display:none"></div>
+    <div class="auth-foot">Se non sei autorizzato, contatta l'amministratore.</div>
+  </div>
+</div>
+
 <header class="hdr">
   <div class="hlogo">
     <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -110,6 +140,10 @@
     </a>
   </nav>
   <div class="hactions">
+    <button class="hbtn-admin" id="btnAdminOpen" aria-label="Pannello admin" title="Gestione utenti" style="display:none">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <span class="hbtn-label">Admin</span>
+    </button>
     <button class="hbtn-trash" id="btnTrashOpen" aria-label="Cestino chiamate" title="Cestino chiamate">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>
       <span class="hbtn-label">Cestino</span>
@@ -118,6 +152,24 @@
     <button class="ibtn" data-theme-toggle aria-label="Cambia tema">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
     </button>
+    <div class="user-menu" id="userMenu" style="display:none">
+      <button type="button" class="user-menu-trigger" id="userMenuBtn" aria-haspopup="true" aria-expanded="false">
+        <span class="user-menu-avatar" id="userMenuAvatar">·</span>
+        <span class="user-menu-name" id="userMenuName">·</span>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="user-menu-dropdown" id="userMenuDropdown">
+        <div class="user-menu-info">
+          <div class="user-menu-fullname" id="userMenuFullname">·</div>
+          <div class="user-menu-email" id="userMenuEmail">·</div>
+          <div class="user-menu-role" id="userMenuRole">·</div>
+        </div>
+        <button type="button" class="user-menu-logout" id="btnSignOut">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Esci
+        </button>
+      </div>
+    </div>
   </div>
 </header>
 
@@ -517,6 +569,82 @@
         </svg>
         Esporta
       </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal Pannello Admin: gestione utenti -->
+<div class="mov" id="madmin">
+  <div class="mbox" style="max-width:760px;width:min(94vw,760px);text-align:left">
+    <div class="mtit" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <span style="display:flex;align-items:center;gap:.5rem">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        Gestione utenti
+      </span>
+      <button class="ibtn" id="btnAdminClose" type="button" title="Chiudi">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="mmsg" style="text-align:left;max-width:none">
+      Solo le email presenti in questa lista possono accedere all'app. Cancellare un utente elimina anche <b>tutte le sue chiamate</b> in modo irreversibile.
+    </div>
+    <div id="adminUserList" style="margin-top:14px;max-height:50vh;overflow-y:auto;border:1px solid var(--bord);border-radius:12px;background:var(--surface2)"></div>
+    <div style="margin-top:14px">
+      <button class="bconf2" id="btnAdminAddUser" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-2px;margin-right:4px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Aggiungi utente
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: aggiungi utente -->
+<div class="mov" id="madminAdd">
+  <div class="mbox" style="max-width:480px">
+    <div class="mtit">Aggiungi utente</div>
+    <div class="mmsg" style="text-align:left">
+      Inserisci i dati. L'utente potrà accedere appena fa login con la sua email Google.
+    </div>
+    <div style="margin-top:14px;display:flex;flex-direction:column;gap:.85rem">
+      <div>
+        <label class="fl" for="addUserName">Nome completo</label>
+        <input type="text" id="addUserName" class="inp" placeholder="es. Mario Rossi" maxlength="80">
+      </div>
+      <div>
+        <label class="fl" for="addUserEmail">Email Google</label>
+        <input type="email" id="addUserEmail" class="inp" placeholder="es. mario.rossi@gmail.com" maxlength="200">
+      </div>
+      <div>
+        <label class="fl">Ruolo</label>
+        <div style="display:flex;gap:1rem;margin-top:.4rem">
+          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="radio" name="addUserRole" value="user" checked> Utente</label>
+          <label style="display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="radio" name="addUserRole" value="admin"> Admin</label>
+        </div>
+      </div>
+      <div id="addUserErr" style="display:none;color:var(--er);font-size:.85rem;font-weight:500"></div>
+    </div>
+    <div class="mac">
+      <button class="bcan" id="btnAdminAddCancel" type="button">Annulla</button>
+      <button class="bconf" id="btnAdminAddConfirm" type="button">Aggiungi</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal: conferma eliminazione utente con doppia digitazione -->
+<div class="mov" id="madminDel">
+  <div class="mbox" style="max-width:480px">
+    <div class="mic er">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+    </div>
+    <div class="mtit">Eliminare l'utente?</div>
+    <div class="mmsg" style="text-align:left" id="madminDelMsg"></div>
+    <div style="margin-top:1rem">
+      <label class="fl" for="adminDelConfirmInput">Per confermare, digita <b>ELIMINA</b></label>
+      <input type="text" id="adminDelConfirmInput" class="inp" placeholder="ELIMINA" autocomplete="off">
+    </div>
+    <div class="mac">
+      <button class="bcan" id="btnAdminDelCancel" type="button">Annulla</button>
+      <button class="bconf" id="btnAdminDelConfirm" type="button" disabled style="background:var(--er);color:#fff;opacity:.5">Elimina</button>
     </div>
   </div>
 </div>
