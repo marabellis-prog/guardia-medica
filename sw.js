@@ -4,7 +4,7 @@
 //            network-only per API Supabase (gestita lato app)
 // ═══════════════════════════════════════════════════════════
 
-var CACHE_NAME = 'guardia-medica-v2';
+var CACHE_NAME = 'guardia-medica-v3';
 var APP_SHELL = [
   './',
   './index.html',
@@ -52,8 +52,12 @@ self.addEventListener('fetch', function(event) {
   catch (e) { return; }
 
   // Supabase API → SEMPRE network. La app gestisce l'offline via syncQueue.
-  // Mai cachare risposte API perché i dati cambiano.
   if (url.hostname.indexOf('supabase.co') !== -1) return;
+
+  // Cache buster (?_check=… per version check, ?_r=… per reload post-update)
+  // → SEMPRE network, niente cache, niente storage. Servono per bypassare
+  // sia SW che CDN. Cacharle riempirebbe la storage di entry duplicate.
+  if (url.search.indexOf('_check=') !== -1 || url.search.indexOf('_r=') !== -1) return;
 
   // Google s2 favicons (per i link rapidi nav) → cache-first lungo
   if (url.hostname === 'www.google.com' && url.pathname.indexOf('/s2/favicons') === 0) {
