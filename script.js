@@ -303,17 +303,46 @@ document.addEventListener('DOMContentLoaded',function(){
   var btnPhoneClear=document.getElementById('btnPhoneClear');
   var btnPhoneAnon=document.getElementById('btnPhoneAnon');
   var btnPhoneEdit=document.getElementById('btnPhoneEdit');
-  if(btnPhoneCancel)btnPhoneCancel.addEventListener('click',function(){chiudi('mphone');phoneModalSpan=null;});
+
+  if(btnPhoneCancel)btnPhoneCancel.addEventListener('click',function(){closePhoneModal();});
+
+  if(btnPhoneEdit)btnPhoneEdit.addEventListener('click',function(){
+    if(!phoneEditMode){
+      setPhoneEditMode();
+    } else {
+      // Conferma → committa, se ok chiudi modal
+      var d=commitPhoneEdit();
+      if(d!==null)closePhoneModal();
+    }
+  });
+
   if(btnPhoneClear)btnPhoneClear.addEventListener('click',function(){
-    chiudi('mphone');phoneModalSpan=null;
-    window.location.href='tel:'+phoneModalNumber;
+    var num=phoneModalNumber;
+    if(phoneEditMode){var d=commitPhoneEdit();if(d===null)return;num=d;}
+    closePhoneModal();
+    window.location.href='tel:'+num;
   });
+
   if(btnPhoneAnon)btnPhoneAnon.addEventListener('click',function(){
-    chiudi('mphone');phoneModalSpan=null;
-    // Codifico #31# come %2331%23 (compatibile iOS/Android)
-    window.location.href='tel:%2331%23'+phoneModalNumber;
+    var num=phoneModalNumber;
+    if(phoneEditMode){var d=commitPhoneEdit();if(d===null)return;num=d;}
+    closePhoneModal();
+    window.location.href='tel:%2331%23'+num;
   });
-  if(btnPhoneEdit)btnPhoneEdit.addEventListener('click',editPhoneInline);
+
+  // Enter dentro l'input = Conferma
+  var mphoneInput=document.getElementById('mphoneInput');
+  if(mphoneInput){
+    mphoneInput.addEventListener('keydown',function(e){
+      if(e.key==='Enter'){e.preventDefault();var d=commitPhoneEdit();if(d!==null)closePhoneModal();}
+      else if(e.key==='Escape'){e.preventDefault();setPhoneViewMode();}
+    });
+    mphoneInput.addEventListener('input',function(){
+      // Nascondi errore se l'utente sta correggendo
+      var er=document.getElementById('mphoneErr');
+      if(er&&er.style.display!=='none')er.style.display='none';
+    });
+  }
 
   // Delete chiamata
   var btnDelCancel=document.getElementById('btnDelCancel');
@@ -1899,7 +1928,7 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mdel'))chiudi('mdel');
   if(e.target===document.getElementById('mpost'))chiudi('mpost');
   if(e.target===document.getElementById('mpostDel'))chiudi('mpostDel');
-  if(e.target===document.getElementById('mphone'))chiudi('mphone');
+  if(e.target===document.getElementById('mphone')){closePhoneModal();}
   if(e.target===document.getElementById('mtrash'))chiudi('mtrash');
   if(e.target===document.getElementById('mtrashEmpty'))chiudi('mtrashEmpty');
   if(e.target===document.getElementById('mexport'))chiudi('mexport');
@@ -2259,8 +2288,9 @@ function fmtPhoneDisplay(digits){
   return digits;
 }
 
-var phoneModalNumber='';
-var phoneModalSpan=null;   // span .ph-link cliccato (per la funzione "Modifica")
+var phoneModalNumber='';     // cifre correnti (per dialing)
+var phoneModalSpan=null;     // span .ph-link cliccato
+var phoneEditMode=false;
 
 function openPhoneModal(num,spanEl){
   // Forza blur dell'elemento attivo per chiudere la tastiera mobile
@@ -2269,36 +2299,83 @@ function openPhoneModal(num,spanEl){
   }
   phoneModalNumber=num;
   phoneModalSpan=spanEl||null;
-  var el=document.getElementById('mphoneNum');
-  if(el)el.textContent=fmtPhoneDisplay(num);
+  setPhoneViewMode();
+  var view=document.getElementById('mphoneNum');
+  var inp=document.getElementById('mphoneInput');
+  if(view)view.textContent=fmtPhoneDisplay(num);
+  if(inp)inp.value=fmtPhoneDisplay(num);
   apri('mphone');
 }
 
-// Trasforma il .ph-link in testo modificabile e ci porta il cursore alla fine
-function editPhoneInline(){
+function setPhoneViewMode(){
+  phoneEditMode=false;
+  var v=document.getElementById('mphoneNum');
+  var i=document.getElementById('mphoneInput');
+  var er=document.getElementById('mphoneErr');
+  var t=document.getElementById('mphoneTitle');
+  var lbl=document.getElementById('phoneEditLabel');
+  var ico=document.getElementById('phoneEditIco');
+  if(v)v.style.display='';
+  if(i)i.style.display='none';
+  if(er)er.style.display='none';
+  if(t)t.textContent='Come vuoi chiamare?';
+  if(lbl)lbl.textContent='Modifica';
+  if(ico)ico.innerHTML='<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>';
+}
+
+function setPhoneEditMode(){
+  phoneEditMode=true;
+  var v=document.getElementById('mphoneNum');
+  var i=document.getElementById('mphoneInput');
+  var er=document.getElementById('mphoneErr');
+  var t=document.getElementById('mphoneTitle');
+  var lbl=document.getElementById('phoneEditLabel');
+  var ico=document.getElementById('phoneEditIco');
+  if(v)v.style.display='none';
+  if(er)er.style.display='none';
+  if(t)t.textContent='Modifica numero';
+  if(lbl)lbl.textContent='Conferma';
+  // Icona check al posto della matita
+  if(ico)ico.innerHTML='<polyline points="20 6 9 17 4 12"/>';
+  if(i){
+    i.style.display='';
+    setTimeout(function(){
+      i.focus();
+      try{i.setSelectionRange(i.value.length,i.value.length);}catch(_e){}
+    },50);
+  }
+}
+
+// Valida + commita l'edit. Ritorna le cifre se ok, null se invalido.
+function commitPhoneEdit(){
+  var inp=document.getElementById('mphoneInput');
+  var er=document.getElementById('mphoneErr');
+  if(!inp)return null;
+  var raw=(inp.value||'').trim();
+  var digits=raw.replace(/\D/g,'');
+  if(digits.length<3){
+    if(er){er.textContent='Numero troppo breve';er.style.display='block';}
+    return null;
+  }
+  if(er)er.style.display='none';
+  // Aggiorna lo span nel cell se esiste
+  if(phoneModalSpan&&phoneModalSpan.parentNode){
+    phoneModalSpan.textContent=raw;
+    phoneModalSpan.dataset.phone=digits;
+    var tr=phoneModalSpan.closest('tr');
+    if(tr)markDirty(tr);
+  }
+  // Aggiorna stato modal
+  phoneModalNumber=digits;
+  var view=document.getElementById('mphoneNum');
+  if(view)view.textContent=raw;
+  return digits;
+}
+
+function closePhoneModal(){
   chiudi('mphone');
-  if(!phoneModalSpan||!phoneModalSpan.parentNode)return;
-  var span=phoneModalSpan;phoneModalSpan=null;
-  var text=span.textContent||'';
-  var parent=span.parentNode;
-  var textNode=document.createTextNode(text);
-  parent.replaceChild(textNode,span);
-
-  // Trova la cella contenteditable e marca dirty
-  var cell=parent.closest('[contenteditable="true"]');
-  if(!cell)return;
-  var tr=cell.closest('tr');
-  if(tr)markDirty(tr);
-
-  // Focus sulla cella e cursore alla fine del testo appena inserito
-  cell.focus();
-  try{
-    var range=document.createRange();
-    range.setStartAfter(textNode);
-    range.collapse(true);
-    var sel=window.getSelection();
-    sel.removeAllRanges();sel.addRange(range);
-  }catch(e){}
+  setPhoneViewMode();
+  phoneModalSpan=null;
 }
 
 // Riapplica linkifyPhones a descrizione/note di una riga, senza disturbare
