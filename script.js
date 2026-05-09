@@ -1,6 +1,6 @@
 // ─── BUILD VERSION (auto-aggiornato dallo script di deploy) ───
 // NON modificare manualmente: il deploy aggiorna questa stringa
-var BUILD_VERSION = '1778339445933';
+var BUILD_VERSION = '1778339608895';
 
 var POST=[],PAGE=1,PROW=null,DROW=null,DELEL=null;
 var dirtyMap={};
@@ -386,15 +386,20 @@ function applyVersionUpdate(){
 
   Promise.all(cleanupPromises).then(function(){
     var reloadUrl=window.location.pathname+'?_r='+Date.now()+window.location.hash;
-    // Pre-fetch con cache:'reload' per ripopolare la disk cache con HTML fresco
-    // (alcuni edge case CDN servono HTML stale anche con query string nuova)
-    fetch(reloadUrl,{
-      cache:'reload',
-      credentials:'same-origin',
-      headers:{'Cache-Control':'no-cache, no-store, must-revalidate'}
-    }).then(function(r){return r.text();})
-      .then(function(){window.location.replace(reloadUrl);})
-      .catch(function(){window.location.replace(reloadUrl);});
+    // Pre-fetch di TUTTI gli asset con cache:'reload': bypassa la disk cache
+    // E sovrascrive ogni entry con il fresh dall'origin. Senza questo,
+    // la HTML reloadata referenzia URL "nude" che restano cacheate stale.
+    var nudeAssets=['./script.js','./style.css','./config.js','./manifest.json','./sw.js','./index.html'];
+    var allFetches=[reloadUrl].concat(nudeAssets);
+    Promise.all(allFetches.map(function(url){
+      return fetch(url,{
+        cache:'reload',
+        credentials:'same-origin',
+        headers:{'Cache-Control':'no-cache, no-store, must-revalidate'}
+      }).then(function(r){return r.text();}).catch(function(){});
+    })).then(function(){
+      window.location.replace(reloadUrl);
+    });
   });
 }
 
