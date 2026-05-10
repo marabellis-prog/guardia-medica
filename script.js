@@ -236,15 +236,21 @@ async function setupAuth(){
   refreshTrashBadge();
 }
 
-async function authSignInWithGoogle(){
+async function authSignInWithGoogle(forceAccountChoice){
   var btn = document.getElementById('btnAuthGoogle');
   if(btn){ btn.disabled = true; btn.querySelector('span').textContent = 'Apertura Google…'; }
   try {
     var client = await getSupabaseClient();
-    await client.auth.signInWithOAuth({
+    var opts = {
       provider: 'google',
       options: { redirectTo: window.location.origin + window.location.pathname }
-    });
+    };
+    // Se richiesto, forza la schermata di scelta account Google
+    // (utile quando il browser è loggato con account sbagliato e tenta auto-login)
+    if(forceAccountChoice){
+      opts.options.queryParams = { prompt: 'select_account' };
+    }
+    await client.auth.signInWithOAuth(opts);
   } catch(e){
     if(btn){ btn.disabled = false; btn.querySelector('span').textContent = 'Accedi con Google'; }
     authShowOverlay('Errore apertura Google: '+(e&&e.message||e));
@@ -956,7 +962,12 @@ document.addEventListener('DOMContentLoaded',function(){
 
   // Auth: login Google + user menu + logout
   var btnAuthGoogle = document.getElementById('btnAuthGoogle');
-  if(btnAuthGoogle) btnAuthGoogle.addEventListener('click', authSignInWithGoogle);
+  if(btnAuthGoogle) btnAuthGoogle.addEventListener('click', function(){ authSignInWithGoogle(false); });
+  var lnkOther = document.getElementById('lnkAuthOtherAccount');
+  if(lnkOther) lnkOther.addEventListener('click', function(e){
+    e.preventDefault();
+    authSignInWithGoogle(true);  // force account picker
+  });
 
   var userMenuBtn = document.getElementById('userMenuBtn');
   if(userMenuBtn) userMenuBtn.addEventListener('click', function(e){
