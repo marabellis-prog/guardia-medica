@@ -3323,9 +3323,9 @@ function linkifyAddresses(html){
 // - Audio + vibrazione su nuova richiesta in arrivo (non al boot)
 // ═══════════════════════════════════════════════════════════════════
 
-var pendingGirate = { incoming: [], outgoing: [] };
-var recentlyDecided = []; // card temporanee (rifiutata/annullata/accettata) auto-dismiss 7s
-var RECENT_DECIDED_TTL = 7000;
+var pendingGirate = { incoming: [], outgoing: [], decided: [] };
+// decided[]: girate concluse non ancora "ack" dall'utente.
+// Persistono in DB (acknowledged_at IS NULL) finché l'utente clicca OK.
 var colleghiCache = null;
 var girateChannel1 = null, girateChannel2 = null;
 var girateInitialLoadDone = false; // dopo il boot iniziale, gli INSERT triggerano audio
@@ -3354,18 +3354,38 @@ function setupGirate(){
 
 function fetchPendingGirate(){
   if(!currentUser || !currentUser.id) return Promise.resolve();
-  // Prendo TUTTE le pending in cui sono coinvolto (in entrambe le direzioni)
-  // RLS già filtra: vedo solo girate con from_user=me o to_user=me
-  var url = 'girate?select=*&status=eq.pending&order=created_at.desc';
+  // Carica TUTTE le girate in cui sono coinvolto e che non sono ancora "ack":
+  //  - status=pending (banner pending)
+  //  - status=rejected/accepted/cancelled con acknowledged_at IS NULL (banner decided)
+  // RLS filtra automaticamente: vedo solo from_user=me o to_user=me
+  var url = 'girate?select=*&acknowledged_at=is.null&order=created_at.desc';
   return sbFetch(url).then(function(res){return res.json();}).then(function(data){
-    if(!Array.isArray(data)){pendingGirate={incoming:[],outgoing:[]};renderGirateBanner();return;}
-    var inc = [], out = [];
+    if(!Array.isArray(data)){
+      pendingGirate = {incoming:[], outgoing:[], decided:[]};
+      renderGirateBanner();
+      return;
+    }
+    var inc = [], out = [], dec = [];
+    var meId = currentUser.id;
     data.forEach(function(g){
-      if(g.to_user_id === currentUser.id) inc.push(g);
-      else if(g.from_user_id === currentUser.id) out.push(g);
+      if(g.status === 'pending'){
+        if(g.to_user_id === meId) inc.push(g);
+        else if(g.from_user_id === meId) out.push(g);
+      } else if(g.status === 'rejected' || g.status === 'accepted'){
+        // Notifica al MITTENTE: il collega ha deciso sulla mia girata
+        if(g.from_user_id === meId){
+          dec.push({ girata:g, kind:g.status, direction:'outgoing' });
+        }
+      } else if(g.status === 'cancelled'){
+        // Notifica al DESTINATARIO: il mittente ha annullato la richiesta
+        if(g.to_user_id === meId){
+          dec.push({ girata:g, kind:'cancelled', direction:'incoming' });
+        }
+      }
     });
     pendingGirate.incoming = inc;
     pendingGirate.outgoing = out;
+    pendingGirate.decided = dec;
     renderGirateBanner();
   }).catch(function(){
     // Non azzero in caso di errore di rete: meglio mostrare stato stale che vuoto
@@ -3373,21 +3393,25 @@ function fetchPendingGirate(){
   });
 }
 
-// Aggiunge una girata "decisa" (rejected/cancelled/accepted) al banner per X secondi
-// kind: 'rejected' | 'cancelled' | 'accepted'
-// direction: 'outgoing' (mittente vede esito) | 'incoming' (destinatario vede annullamento)
-function pushRecentlyDecided(girata, kind, direction){
-  if(!girata || !girata.id) return;
-  // Dedup: se esiste già con stesso id, sostituisci
-  recentlyDecided = recentlyDecided.filter(function(d){return d.girata.id !== girata.id;});
-  var entry = { girata:girata, kind:kind, direction:direction, expireAt:Date.now()+RECENT_DECIDED_TTL };
-  recentlyDecided.push(entry);
-  renderGirateBanner();
-  // Auto-dismiss
-  setTimeout(function(){
-    recentlyDecided = recentlyDecided.filter(function(d){return d.girata.id !== girata.id || d.expireAt > Date.now();});
+// Ack di una girata "decisa" — chiama RPC + rimuove localmente + re-render
+function ackGirata(girataId, btnEl){
+  if(btnEl){ btnEl.disabled = true; btnEl.innerHTML = '<div class="spin-dark"></div>'; }
+  getSupabaseClient().then(function(client){
+    return client.rpc('ack_girata', { p_girata_id: girataId });
+  }).then(function(res){
+    if(res.error){
+      if(btnEl){ btnEl.disabled = false; btnEl.innerHTML = 'OK'; }
+      // Anche su errore, refresh per allineare UI
+      fetchPendingGirate();
+      return;
+    }
+    // Rimuovi subito localmente (UX reattiva)
+    pendingGirate.decided = (pendingGirate.decided||[]).filter(function(d){return d.girata.id !== girataId;});
     renderGirateBanner();
-  }, RECENT_DECIDED_TTL + 100);
+  }).catch(function(){
+    if(btnEl){ btnEl.disabled = false; btnEl.innerHTML = 'OK'; }
+    fetchPendingGirate();
+  });
 }
 
 function renderGirateBanner(){
@@ -3395,17 +3419,15 @@ function renderGirateBanner(){
   if(!b) return;
   var inc = pendingGirate.incoming || [];
   var out = pendingGirate.outgoing || [];
-  // Pulisci recentlyDecided scaduti
-  var now = Date.now();
-  recentlyDecided = recentlyDecided.filter(function(d){return d.expireAt > now;});
+  var dec = pendingGirate.decided || [];
 
-  if(!inc.length && !out.length && !recentlyDecided.length){ b.style.display='none'; b.innerHTML=''; return; }
+  if(!inc.length && !out.length && !dec.length){ b.style.display='none'; b.innerHTML=''; return; }
   var html = '';
 
-  // Sezione "decisi di recente" — appare sopra alle pending, auto-dismiss 7s
-  if(recentlyDecided.length){
+  // Sezione "decisi" — persistente fino ad ack utente
+  if(dec.length){
     html += '<div class="girate-banner-section">';
-    recentlyDecided.forEach(function(d){
+    dec.forEach(function(d){
       var g = d.girata;
       var kind = d.kind; // rejected | cancelled | accepted
       var direction = d.direction; // outgoing | incoming
@@ -3429,23 +3451,24 @@ function renderGirateBanner(){
         msg = '<b>'+esc(who)+'</b> ha annullato la richiesta';
         cardClass = 'cancelled';
       } else {
-        return; // skip: caso non rilevante per UX (es. own cancel — già notificato via fb)
+        return; // skip: caso non rilevante per UX
       }
       var when = formatTSFromISO(g.snapshot_ts) || '';
       var post = esc(g.snapshot_postazione || '—');
+      var decidedAt = formatTSFromISO(g.decided_at) || '';
       var desc = esc((g.snapshot_descrizione || '').substring(0,140))
                + ((g.snapshot_descrizione||'').length>140?'…':'');
       html += '<div class="girate-card '+cardClass+'" data-decided-id="'+esc(g.id)+'">'
         + '<div class="girate-card-info">'
         +   '<div class="girate-decided-title">'+icon+' '+sectionTitle+'</div>'
-        +   '<div class="girate-card-meta">'+msg+'</div>'
+        +   '<div class="girate-card-meta">'+msg+(decidedAt?' · '+esc(decidedAt):'')+'</div>'
         +   '<div class="girate-card-meta" style="font-weight:500">Chiamata del '+esc(when)+' · '+post+'</div>'
         +   '<div class="girate-card-desc">'+desc+'</div>'
         + '</div>'
         + '<div class="girate-card-actions">'
-        +   '<button type="button" class="girate-btn cancel" data-action="dismiss-decided" data-id="'+esc(g.id)+'" title="Rimuovi">'
-        +     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
-        +     'OK'
+        +   '<button type="button" class="girate-btn ack" data-action="ack" data-id="'+esc(g.id)+'" title="Conferma di averlo letto">'
+        +     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+        +     'OK, letto'
         +   '</button>'
         + '</div>'
       + '</div>';
@@ -3553,7 +3576,8 @@ function setupGirateRealtime(){
 function handleGirateRealtimeEvent(payload, direction){
   var ev = payload.eventType || payload.event;
   var newRow = payload.new || {};
-  // Refresh sempre il banner per riflettere lo stato corrente delle pending
+  // Refresh il banner: fetchPendingGirate carica pending + decided non-ack,
+  // quindi qualsiasi cambio di stato finisce nel banner finché l'utente non ack.
   fetchPendingGirate();
 
   // Audio + vibrazione SOLO per nuove richieste in arrivo (incoming INSERT pending)
@@ -3563,20 +3587,15 @@ function handleGirateRealtimeEvent(payload, direction){
     fb(true, 'Nuova chiamata', 'Hai ricevuto una chiamata da '+(newRow.from_user_nome||'un collega'));
   }
 
-  // Outgoing accettato dal collega → mostra card verde + ricarica lista (per il badge "Girata a X")
+  // Beep diverso (più breve/positivo) anche per accept/reject ricevuti dal mittente
+  if(direction === 'outgoing' && ev === 'UPDATE' && girateInitialLoadDone &&
+     (newRow.status === 'accepted' || newRow.status === 'rejected')){
+    playGirataSound();
+  }
+
+  // Outgoing accettato dal collega → ricarica lista per mostrare il badge "Girata a X"
   if(direction === 'outgoing' && ev === 'UPDATE' && newRow.status === 'accepted'){
-    pushRecentlyDecided(newRow, 'accepted', 'outgoing');
     loadRows(PAGE);
-  }
-
-  // Outgoing rifiutato dal collega → mostra card rossa "Chiamata rifiutata" auto-dismiss 7s
-  if(direction === 'outgoing' && ev === 'UPDATE' && newRow.status === 'rejected'){
-    pushRecentlyDecided(newRow, 'rejected', 'outgoing');
-  }
-
-  // Incoming: il mittente ha annullato → mostra card grigia "Richiesta annullata"
-  if(direction === 'incoming' && ev === 'UPDATE' && newRow.status === 'cancelled'){
-    pushRecentlyDecided(newRow, 'cancelled', 'incoming');
   }
 
   // Incoming accettato (da me, in altro device) → ricarica per vedere la nuova chiamata
@@ -3783,10 +3802,7 @@ function setupGirateBannerDelegation(){
     if(action === 'accept') acceptGirata(id, btn);
     else if(action === 'reject') rejectGirata(id, btn);
     else if(action === 'cancel') cancelGirata(id, btn);
-    else if(action === 'dismiss-decided'){
-      recentlyDecided = recentlyDecided.filter(function(d){return d.girata.id !== id;});
-      renderGirateBanner();
-    }
+    else if(action === 'ack') ackGirata(id, btn);
   });
 }
 
