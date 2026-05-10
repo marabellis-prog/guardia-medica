@@ -774,13 +774,30 @@ function handleShortcutAction(){
 var externalWindows={};
 
 function openExternalLink(url,name){
+  // 1. Reference in memoria (se ancora valido e non chiuso)
   var w=externalWindows[name];
   if(w&&!w.closed){
-    try{w.focus();return;}catch(e){/* fallback: riapri */}
+    try{w.focus();return;}catch(_){/* fallback: riapri */}
   }
-  // window.open con name come identificatore: se già aperto altrove con lo stesso name
-  // il browser lo riutilizza. Diversamente apre nuova finestra/tab.
-  externalWindows[name]=window.open(url,name);
+  // 2. Named-window discovery: chiedi al browser SE c'è già una tab con quel name.
+  //    window.open('', name) ritorna il reference SENZA navigarla se esiste.
+  //    Se non esiste, ne crea una vuota (about:blank) → la navighiamo noi.
+  w=window.open('',name);
+  if(!w){return;} // popup bloccato
+  var needsNavigate=false;
+  try{
+    var href=w.location.href;
+    needsNavigate=(!href||href==='about:blank');
+  }catch(_){
+    // SecurityError = cross-origin (la tab è già su un'altra origin, es. tessera sanitaria)
+    // → NON navigarla, solo focus per non perdere la sessione/dove era arrivato l'utente
+    needsNavigate=false;
+  }
+  if(needsNavigate){
+    w.location.href=url;
+  }
+  try{w.focus();}catch(_){}
+  externalWindows[name]=w;
 }
 
 function setupQuickLinks(){
