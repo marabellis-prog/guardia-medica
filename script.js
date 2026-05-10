@@ -3091,19 +3091,45 @@ var phoneEditMode=false;
 // ───────────────────────────────────────────────────────────
 var ADDR_TOPONIMI = '(?:via|viale|v\\.?le|vl\\.?|piazza|p\\.?zza|p\\.?za|pza|piazzale|p\\.?le|p\\.?zle|piazzetta|corso|c\\.?so|cso|largo|l\\.?go|lgo|vicolo|v\\.?lo|vlo|vicoletto|vico|salita|sal\\.?|strada|str\\.?|s\\.?da|stradella|stradello|stradina|traversa|trav\\.?|loc\\.?|localit[aà]|loc\\.?t[aà]|lungomare|lungolago|lungoargine|lungofiume|lungo(?=tevere|po|adige)|circonvallazione|circ\\.?ne|circondario|contrada|c\\.?da|contr[aà]|chiasso|campiello|calle|campo|carraia|carrarone|frazione|fraz\\.?|giardino|maso|parallela|passeggiata|pass\\.?ta|rotonda|vietta|viottolo|viuzza|viuzzo|discesa|disc\\.?|diga|borgo|borg\\.?|rione|prato|prati|riviera|spianata|terrazza|via\\.?le|cosentina|panoramica)';
 
+// Determina dove finisce l'indirizzo nel match. Logica:
+//   - Match generoso fino a newline/punto-virgola/<.
+//   - Le virgole NON terminano l'indirizzo SE la parte dopo
+//     inizia con cifra (civico/CAP) o maiuscola (città/frazione).
+//   - Se inizia con minuscola (probabile descrizione del paziente) → stop.
+//   - Tronca prima di parole rumore post-indirizzo (interno, scala, ...).
+//   - Tronca a fine frase (". " seguito da maiuscola).
+function computeAddressEnd(text){
+  var len=text.length, idx=0;
+  while(true){
+    var c=text.indexOf(',', idx);
+    if(c===-1){idx=len;break;}
+    var after=text.substring(c+1).replace(/^\s+/,'');
+    if(!after){idx=c;break;}
+    var fc=after.charAt(0);
+    if(/[\dA-ZÀ-Ü]/.test(fc)){idx=c+1;}
+    else{idx=c;break;}
+  }
+  // Tronca a parole rumore (preserve l'inizio = match toponimo, cerca solo dopo)
+  var noiseRe=/\s+(?:int(?:erno|\.)?|sc(?:ala|\.)?|pal(?:azzo|\.)?|piano|edif(?:icio|\.)?|cit(?:ofono|\.)?|civ(?:ico|\.)?|tel(?:efono|\.)?|ingresso|portone|cell(?:ulare|\.)?|presso|c\/o)\b/i;
+  var noise=text.substring(0,idx).match(noiseRe);
+  if(noise&&noise.index>5)idx=noise.index;
+  // Tronca a fine frase (". X" con X maiuscola)
+  var sub=text.substring(0,idx);
+  var sent=sub.search(/\.\s+[A-ZÀ-Ü]/);
+  if(sent>5)idx=sent;
+  return idx;
+}
+
 function linkifyAddresses(html){
-  // Match: toponimo + separatore + almeno una parola/numero + fino a virgola/newline/EOL
-  var re = new RegExp('\\b' + ADDR_TOPONIMI + '\\.?[\\s.]+\\w[^,;\\n<]{0,90}', 'gi');
+  // Match generoso: include virgole; il parser computeAddressEnd taglia dopo
+  var re=new RegExp('\\b'+ADDR_TOPONIMI+'\\.?[\\s.]+\\w[^;\\n<]{0,200}', 'gi');
   return html.replace(re,function(match){
-    // Pulisci trailing whitespace/punteggiatura non utile
-    var clean=match.replace(/[\s.]+$/,'').trim();
+    var stopIdx=computeAddressEnd(match);
+    var clean=match.substring(0,stopIdx).replace(/[\s.]+$/,'').trim();
     if(clean.length<6)return match;
-    // Tronca prima di parole "rumore" tipiche post-indirizzo
-    // (interno, scala, palazzo, piano, edificio, citofono, civico, telefono)
-    clean=clean.replace(/\s+(?:int(?:erno|\.|\s)|sc(?:ala|\.|\s)|pal(?:azzo|\.|\s)|piano|edif(?:icio|\.|\s)|cit(?:ofono|\.|\s)|civ(?:ico|\.|\s)|tel(?:efono|\.|\s)|ingresso|portone|cell(?:ulare|\.|\s)|presso|c\/o)\b.*$/i,'');
-    if(clean.length<6)return match;
+    var rest=match.substring(clean.length);
     var query=clean.replace(/"/g,'&quot;');
-    return '<span class="addr-link" contenteditable="false" data-addr="'+query+'" title="Tocca per aprire mappa">'+clean+'</span>'+match.substring(clean.length);
+    return '<span class="addr-link" contenteditable="false" data-addr="'+query+'" title="Tocca per aprire mappa">'+clean+'</span>'+rest;
   });
 }
 
