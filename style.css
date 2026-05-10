@@ -479,6 +479,132 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
 .ph-link:hover{background:var(--pr);color:#fff;text-decoration-color:rgba(255,255,255,.5);transform:translateY(-1px)}
 .ph-link:active{transform:translateY(0)}
 
+/* ═══════════════════════════════════════
+   GIRA CHIAMATA
+═══════════════════════════════════════ */
+/* Banner sopra lista — bordo arancione, NON sticky */
+.girate-banner{
+  border:2px solid #d97706;
+  border-radius:14px;
+  background:linear-gradient(180deg,rgba(217,119,6,.07),rgba(217,119,6,.02));
+  padding:.85rem 1rem;
+  margin-bottom:1rem;
+  box-shadow:0 1px 6px rgba(217,119,6,.18);
+  animation:girateBannerIn .3s ease-out;
+}
+@keyframes girateBannerIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+.girate-banner-section{display:flex;flex-direction:column;gap:.5rem}
+.girate-banner-section + .girate-banner-section{margin-top:.85rem;padding-top:.85rem;border-top:1px dashed rgba(217,119,6,.4)}
+.girate-banner-title{
+  display:flex;align-items:center;gap:.5rem;
+  font-weight:700;font-size:.85rem;
+  color:#d97706;text-transform:uppercase;letter-spacing:.04em;
+}
+[data-theme="dark"] .girate-banner-title{color:#fbbf24}
+.girate-banner-title svg{flex-shrink:0}
+.girate-card{
+  display:flex;align-items:flex-start;gap:.7rem;flex-wrap:wrap;
+  padding:.7rem .85rem;
+  background:var(--surface);
+  border:1px solid var(--bord);border-radius:10px;
+  transition:background var(--tr);
+}
+.girate-card-info{flex:1;min-width:200px;display:flex;flex-direction:column;gap:.25rem}
+.girate-card-meta{font-size:.78rem;color:var(--txm);font-weight:600}
+.girate-card-meta b{color:var(--tx);font-weight:700}
+.girate-card-desc{font-size:.85rem;color:var(--txm);line-height:1.45;white-space:pre-wrap;word-break:break-word;max-height:60px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+.girate-card-actions{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center}
+.girate-btn{
+  display:inline-flex;align-items:center;gap:.3rem;
+  height:38px;padding:0 1rem;
+  border-radius:var(--r2);
+  font-size:.85rem;font-weight:600;
+  cursor:pointer;
+  transition:all var(--tr);
+  border:none;white-space:nowrap;
+}
+.girate-btn.accept{background:var(--pr);color:#fff}
+.girate-btn.accept:hover{background:var(--prh);transform:translateY(-1px);box-shadow:0 2px 6px rgba(46,125,94,.3)}
+.girate-btn.reject{background:var(--erbg);color:var(--er);border:1px solid var(--er)}
+.girate-btn.reject:hover{background:var(--er);color:#fff}
+.girate-btn.cancel{background:var(--surface2);color:var(--txm);border:1px solid var(--bord)}
+.girate-btn.cancel:hover{background:var(--surfoff);color:var(--tx)}
+.girate-btn:disabled{opacity:.6;cursor:wait}
+.girate-pending-tag{
+  display:inline-flex;align-items:center;gap:.3rem;
+  padding:.3rem .6rem;border-radius:99px;
+  background:rgba(217,119,6,.12);color:#d97706;
+  border:1px solid rgba(217,119,6,.3);
+  font-size:.75rem;font-weight:600;
+}
+[data-theme="dark"] .girate-pending-tag{color:#fbbf24;background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.3)}
+
+/* Bottone Gira nelle azioni della riga */
+.iho-gira{
+  width:32px;height:32px;border-radius:var(--r1);
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(21,101,192,.12);color:#1565c0;
+  border:1px solid rgba(21,101,192,.35);
+  cursor:pointer;transition:all var(--tr);
+  flex-shrink:0;
+}
+.iho-gira:hover{background:#1565c0;color:#fff;transform:scale(1.05)}
+[data-theme="dark"] .iho-gira{background:rgba(100,181,246,.12);color:#64b5f6;border-color:rgba(100,181,246,.35)}
+[data-theme="dark"] .iho-gira:hover{background:#64b5f6;color:#0b1c3a}
+.iho-gira.disabled{opacity:.35;cursor:default;pointer-events:none}
+
+/* Badge permanente "Girata a/da X" sopra/sotto la descrizione */
+.girata-badge{
+  display:inline-flex;align-items:center;gap:.35rem;
+  padding:2px 8px;border-radius:99px;
+  font-size:.72rem;font-weight:600;
+  background:rgba(21,101,192,.12);color:#1565c0;
+  border:1px solid rgba(21,101,192,.3);
+  margin-bottom:.35rem;
+  white-space:nowrap;
+}
+.girata-badge.from{background:rgba(46,125,94,.12);color:var(--pr);border-color:rgba(46,125,94,.3)}
+.girata-badge.pending{background:rgba(217,119,6,.12);color:#d97706;border-color:rgba(217,119,6,.3);animation:girataPendingPulse 2s ease-in-out infinite}
+[data-theme="dark"] .girata-badge{background:rgba(100,181,246,.1);color:#64b5f6;border-color:rgba(100,181,246,.3)}
+[data-theme="dark"] .girata-badge.from{background:rgba(79,168,130,.12);color:var(--pr)}
+[data-theme="dark"] .girata-badge.pending{background:rgba(251,191,36,.1);color:#fbbf24;border-color:rgba(251,191,36,.3)}
+@keyframes girataPendingPulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.3)}
+  50%{box-shadow:0 0 0 4px rgba(217,119,6,0)}
+}
+
+/* Modal selezione collega: lista */
+.collega-row{
+  display:flex;align-items:center;gap:.7rem;
+  padding:.85rem 1rem;
+  border-bottom:1px solid var(--div);
+  cursor:pointer;
+  transition:background var(--tr);
+}
+.collega-row:last-child{border-bottom:none}
+.collega-row:hover{background:var(--surface)}
+.collega-row:active{background:var(--prl)}
+.collega-avatar{
+  width:36px;height:36px;border-radius:50%;
+  background:var(--pr);color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:.95rem;
+  flex-shrink:0;
+}
+.collega-name{flex:1;font-weight:600;color:var(--tx);font-size:.95rem}
+.collega-arrow{color:var(--txm);flex-shrink:0;transition:transform var(--tr)}
+.collega-row:hover .collega-arrow{transform:translateX(3px);color:var(--pr)}
+
+@media(max-width:640px){
+  .girate-banner{padding:.7rem .8rem;border-radius:12px;margin-bottom:.85rem}
+  .girate-banner-title{font-size:.78rem}
+  .girate-card{padding:.6rem .7rem}
+  .girate-card-info{min-width:0;flex:1 1 100%}
+  .girate-card-actions{flex:1 1 100%;justify-content:flex-end;gap:.35rem}
+  .girate-btn{height:42px;padding:0 1rem;font-size:.9rem;flex:1;justify-content:center}
+  .iho-gira{width:36px;height:36px}
+}
+
 /* Link indirizzo cliccabile (apre Maps / Naviga) */
 .addr-link{display:inline;color:#1565c0;background:rgba(21,101,192,.10);border-radius:5px;padding:0 5px;margin:0 1px;cursor:pointer;font-weight:600;text-decoration:underline;text-decoration-color:rgba(21,101,192,.35);text-decoration-thickness:1.5px;text-underline-offset:3px;transition:background var(--tr),color var(--tr);user-select:text}
 .addr-link::before{content:"\1F4CD\00a0";font-size:.85em;opacity:.85;text-decoration:none}
