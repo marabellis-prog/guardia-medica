@@ -2509,9 +2509,25 @@ function showUndoBanner(rowId){
 function drawPgn(tot,pg,sz){
   var pages=Math.ceil(tot/sz),w=document.getElementById('pgn');
   if(pages<=1){w.innerHTML='';return;}
-  var h='<button class="bp"'+(pg===1?' disabled':'')+' onclick="loadRows('+(pg-1)+')">&#8249;</button>';
-  for(var i=1;i<=pages;i++)h+='<button class="bp'+(i===pg?' act':'')+'" onclick="loadRows('+i+')">'+i+'</button>';
-  h+='<button class="bp"'+(pg===pages?' disabled':'')+' onclick="loadRows('+(pg+1)+')">&#8250;</button>';
+  // Sliding window: max 5 numeri di pagina visibili intorno alla corrente
+  var WINDOW=5;
+  var half=Math.floor(WINDOW/2);
+  var start=Math.max(1,pg-half);
+  var end=Math.min(pages,start+WINDOW-1);
+  if(end-start+1<WINDOW)start=Math.max(1,end-WINDOW+1);
+  var h='';
+  // Prima pagina (<<)
+  h+='<button class="bp"'+(pg===1?' disabled':'')+' onclick="loadRows(1)" title="Prima pagina">&laquo;</button>';
+  // Pagina precedente (<)
+  h+='<button class="bp"'+(pg===1?' disabled':'')+' onclick="loadRows('+(pg-1)+')" title="Pagina precedente">&lsaquo;</button>';
+  // Pagine numerate (window)
+  for(var i=start;i<=end;i++){
+    h+='<button class="bp'+(i===pg?' act':'')+'" onclick="loadRows('+i+')">'+i+'</button>';
+  }
+  // Pagina successiva (>)
+  h+='<button class="bp"'+(pg===pages?' disabled':'')+' onclick="loadRows('+(pg+1)+')" title="Pagina successiva">&rsaquo;</button>';
+  // Ultima pagina (>>)
+  h+='<button class="bp"'+(pg===pages?' disabled':'')+' onclick="loadRows('+pages+')" title="Ultima pagina">&raquo;</button>';
   w.innerHTML=h;
 }
 
