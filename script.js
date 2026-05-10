@@ -1112,7 +1112,6 @@ document.addEventListener('DOMContentLoaded',function(){
   var btnAddrCancel=document.getElementById('btnAddrCancel');
   var btnAddrEdit=document.getElementById('btnAddrEdit');
   var btnAddrMaps=document.getElementById('btnAddrMaps');
-  var btnAddrNav=document.getElementById('btnAddrNav');
   if(btnAddrCancel)btnAddrCancel.addEventListener('click',closeAddrModal);
   if(btnAddrEdit)btnAddrEdit.addEventListener('click',function(){
     if(!addrEditMode){setAddrEditMode();}
@@ -1122,13 +1121,13 @@ document.addEventListener('DOMContentLoaded',function(){
     var q=addrModalQuery;
     if(addrEditMode){var d=commitAddrEdit();if(d===null)return;q=d;}
     closeAddrModal();
-    openInGoogleMaps(q);
-  });
-  if(btnAddrNav)btnAddrNav.addEventListener('click',function(){
-    var q=addrModalQuery;
-    if(addrEditMode){var d=commitAddrEdit();if(d===null)return;q=d;}
-    closeAddrModal();
-    openInDeviceNavigator(q);
+    // Mobile: schema geo:/maps: → l'OS chiede quale app usare (Android picker, iOS Apple Maps)
+    // Desktop: Google Maps in finestra dedicata
+    if(isMobileDevice()){
+      openInDeviceNavigator(q);
+    } else {
+      openInGoogleMaps(q);
+    }
   });
   var maddrInput=document.getElementById('maddrInput');
   if(maddrInput){
@@ -3199,9 +3198,6 @@ function openAddrModal(query,spanEl){
   var inp=document.getElementById('maddrInput');
   if(view)view.textContent=query;
   if(inp)inp.value=query;
-  // Mostra/nascondi pulsante "Naviga" in base al device
-  var btnNav=document.getElementById('btnAddrNav');
-  if(btnNav)btnNav.style.display=isMobileDevice()?'inline-flex':'none';
   apri('maddr');
 }
 
