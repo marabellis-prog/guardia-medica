@@ -34,10 +34,10 @@ body{min-height:100dvh;font-family:var(--fb);font-size:clamp(1rem,.95rem + .25vw
 button{cursor:pointer;background:none;border:none;font:inherit;color:inherit}
 input,textarea,select{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--pr);outline-offset:2px;border-radius:var(--r1)}
-.hdr{background:var(--surface);border-bottom:1px solid var(--div);padding:1rem 1.5rem;display:flex;align-items:center;gap:1rem;position:sticky;top:0;z-index:100;box-shadow:var(--sh1)}
-.hlogo{display:flex;align-items:center;gap:.75rem;flex:1;min-width:0}
-.hquick{display:flex;align-items:center;gap:.5rem;flex:0 0 auto}
-.hactions{display:flex;align-items:center;gap:.4rem;flex:1;justify-content:flex-end;min-width:0}
+.hdr{background:var(--surface);border-bottom:1px solid var(--div);padding:1rem 1.5rem;display:flex;align-items:center;justify-content:space-between;gap:1rem;position:sticky;top:0;z-index:100;box-shadow:var(--sh1)}
+.hlogo{display:flex;align-items:center;gap:.75rem;min-width:0}
+.hquick{display:flex;align-items:center;justify-content:center;gap:.6rem;margin-bottom:1.25rem;flex-wrap:wrap}
+.hactions{display:flex;align-items:center;gap:.4rem;justify-content:flex-end;min-width:0}
 .hquick-link{display:inline-flex;align-items:center;justify-content:center;gap:.55rem;padding:.5rem .9rem;min-height:44px;border:1px solid var(--bord);border-radius:var(--r2);background:var(--surface2);color:var(--tx);font-size:.9rem;font-weight:600;text-decoration:none;transition:all var(--tr);white-space:nowrap;cursor:pointer}
 .hquick-link:hover{background:var(--prl);border-color:var(--pr);color:var(--pr);transform:translateY(-1px);box-shadow:var(--sh1)}
 .hquick-link:active{transform:translateY(0)}
