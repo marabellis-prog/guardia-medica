@@ -458,6 +458,13 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
 .ph-link:hover{background:var(--pr);color:#fff;text-decoration-color:rgba(255,255,255,.5);transform:translateY(-1px)}
 .ph-link:active{transform:translateY(0)}
 
+/* Link indirizzo cliccabile (apre Maps / Naviga) */
+.addr-link{display:inline;color:#1565c0;background:rgba(21,101,192,.10);border-radius:5px;padding:0 5px;margin:0 1px;cursor:pointer;font-weight:600;text-decoration:underline;text-decoration-color:rgba(21,101,192,.35);text-decoration-thickness:1.5px;text-underline-offset:3px;transition:background var(--tr),color var(--tr);user-select:text}
+.addr-link::before{content:"\1F4CD\00a0";font-size:.85em;opacity:.85;text-decoration:none}
+.addr-link:hover{background:#1565c0;color:#fff;text-decoration-color:rgba(255,255,255,.5)}
+[data-theme="dark"] .addr-link{color:#64b5f6;background:rgba(100,181,246,.12);text-decoration-color:rgba(100,181,246,.4)}
+[data-theme="dark"] .addr-link:hover{background:#64b5f6;color:#0b1c3a}
+
 /* ═══════════════════════════════════════
    MOBILE — card layout (≤ 640px)
 ═══════════════════════════════════════ */
