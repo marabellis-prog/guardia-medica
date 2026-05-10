@@ -1074,6 +1074,40 @@ document.addEventListener('DOMContentLoaded',function(){
     window.location.href='tel:%2331%23'+num;
   });
 
+  // Modal indirizzo
+  var btnAddrCancel=document.getElementById('btnAddrCancel');
+  var btnAddrEdit=document.getElementById('btnAddrEdit');
+  var btnAddrMaps=document.getElementById('btnAddrMaps');
+  var btnAddrNav=document.getElementById('btnAddrNav');
+  if(btnAddrCancel)btnAddrCancel.addEventListener('click',closeAddrModal);
+  if(btnAddrEdit)btnAddrEdit.addEventListener('click',function(){
+    if(!addrEditMode){setAddrEditMode();}
+    else{var d=commitAddrEdit();if(d!==null)closeAddrModal();}
+  });
+  if(btnAddrMaps)btnAddrMaps.addEventListener('click',function(){
+    var q=addrModalQuery;
+    if(addrEditMode){var d=commitAddrEdit();if(d===null)return;q=d;}
+    closeAddrModal();
+    openInGoogleMaps(q);
+  });
+  if(btnAddrNav)btnAddrNav.addEventListener('click',function(){
+    var q=addrModalQuery;
+    if(addrEditMode){var d=commitAddrEdit();if(d===null)return;q=d;}
+    closeAddrModal();
+    openInDeviceNavigator(q);
+  });
+  var maddrInput=document.getElementById('maddrInput');
+  if(maddrInput){
+    maddrInput.addEventListener('keydown',function(e){
+      if(e.key==='Enter'){e.preventDefault();var d=commitAddrEdit();if(d!==null)closeAddrModal();}
+      else if(e.key==='Escape'){e.preventDefault();setAddrViewMode();}
+    });
+    maddrInput.addEventListener('input',function(){
+      var er=document.getElementById('maddrErr');
+      if(er&&er.style.display!=='none')er.style.display='none';
+    });
+  }
+
   // Enter dentro l'input = Conferma
   var mphoneInput=document.getElementById('mphoneInput');
   if(mphoneInput){
@@ -1620,8 +1654,8 @@ function drawRows(recs,highlightQuery){
       return '<div class="post-opt" data-nome="'+esc(p.nome)+'" data-colore="'+esc(p.colore||'#2e7d5e')+'">'
         +'<span class="post-dot" style="background:'+esc(p.colore||'#2e7d5e')+'"></span>'+esc(p.nome)+'</div>';
     }).join('');
-    var descHtml=linkifyPhones(highlightQuery?highlight(r.descrizione||'',highlightQuery):esc(r.descrizione||''));
-    var noteHtml=linkifyPhones(highlightQuery?highlight(r.note||'',highlightQuery):esc(r.note||''));
+    var descHtml=linkifyAddresses(linkifyPhones(highlightQuery?highlight(r.descrizione||'',highlightQuery):esc(r.descrizione||'')));
+    var noteHtml=linkifyAddresses(linkifyPhones(highlightQuery?highlight(r.note||'',highlightQuery):esc(r.note||'')));
     var si=r.completato
       ?'<div class="ich"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>'
       :'<div class="iho" data-row="'+r.id+'"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg></div>';
@@ -1817,10 +1851,11 @@ function setupTableDelegation(){
   if(!tbody||tbody._delegated)return;
   tbody._delegated=true;
 
-  // Mobile: previene il focus sul contenteditable padre quando si tocca un .ph-link
+  // Mobile: previene il focus sul contenteditable padre quando si tocca un .ph-link / .addr-link
   // (altrimenti la tastiera si apre prima del modal)
   var phPreventFocus=function(e){
-    if(e.target&&e.target.closest&&e.target.closest('.ph-link'))e.preventDefault();
+    if(!e.target||!e.target.closest)return;
+    if(e.target.closest('.ph-link')||e.target.closest('.addr-link'))e.preventDefault();
   };
   tbody.addEventListener('pointerdown',phPreventFocus);
   tbody.addEventListener('mousedown',phPreventFocus);
@@ -1830,11 +1865,19 @@ function setupTableDelegation(){
     var ph=t.closest('.ph-link');
     if(ph){
       e.stopPropagation();e.preventDefault();
-      // Doppio scudo: blur subito qualunque cosa sia focalizzata
       if(document.activeElement&&typeof document.activeElement.blur==='function'){
         try{document.activeElement.blur();}catch(_e){}
       }
       openPhoneModal(ph.dataset.phone,ph);
+      return;
+    }
+    var addr=t.closest('.addr-link');
+    if(addr){
+      e.stopPropagation();e.preventDefault();
+      if(document.activeElement&&typeof document.activeElement.blur==='function'){
+        try{document.activeElement.blur();}catch(_e){}
+      }
+      openAddrModal(addr.dataset.addr||addr.textContent,addr);
       return;
     }
     var iho=t.closest('.iho');
@@ -2674,6 +2717,7 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mpost'))chiudi('mpost');
   if(e.target===document.getElementById('mpostDel'))chiudi('mpostDel');
   if(e.target===document.getElementById('mphone')){closePhoneModal();}
+  if(e.target===document.getElementById('maddr')){closeAddrModal();}
   if(e.target===document.getElementById('mtrash'))chiudi('mtrash');
   if(e.target===document.getElementById('mtrashEmpty'))chiudi('mtrashEmpty');
   if(e.target===document.getElementById('mexport'))chiudi('mexport');
@@ -3018,10 +3062,11 @@ function svgExport(){return '<svg width="14" height="14" viewBox="0 0 24 24" fil
 
 // ───────────────────────────────────────────────────────────
 // CLICK-TO-CALL: trasforma numeri di telefono in link
-// Riconosce mobile (3xx) e fissi (0xx), opz. con prefisso +39
+// Pattern strutturato (mobile 3xx / fisso 0xx, opz +39),
+// non greedy: matcha UN numero alla volta senza fagocitare i seguenti
 // ───────────────────────────────────────────────────────────
 function linkifyPhones(html){
-  var re=/(\+?39[\s.\-]?)?(\d[\d\s.\-]{7,14}\d)/g;
+  var re=/(?:\+?39\s?)?[03]\d{1,3}[\s.\-]?\d{2,4}[\s.\-]?\d{3,4}/g;
   return html.replace(re,function(match){
     var digits=match.replace(/\D/g,'');
     if(digits.length<9||digits.length>12)return match;
@@ -3039,6 +3084,128 @@ function fmtPhoneDisplay(digits){
 var phoneModalNumber='';     // cifre correnti (per dialing)
 var phoneModalSpan=null;     // span .ph-link cliccato
 var phoneEditMode=false;
+
+// ───────────────────────────────────────────────────────────
+// CLICK-TO-MAP: trasforma indirizzi italiani in link
+// ───────────────────────────────────────────────────────────
+function linkifyAddresses(html){
+  // Match: prefisso indirizzo italiano + nome strada + opz numero civico
+  // Si ferma a virgola, punto e virgola, newline, fine stringa o "<" (tag HTML)
+  var re=/\b(?:via|viale|v\.le|piazza|p\.zza|p\.za|piazzale|corso|c\.so|largo|vicolo|salita|strada|loc\.|localit[aà])\b[^,;\n<]{2,80}/gi;
+  return html.replace(re,function(match){
+    // Pulisci trailing whitespace/punteggiatura
+    var clean=match.replace(/[\s.]+$/,'').trim();
+    if(clean.length<6)return match; // troppo corto, probabile falso positivo
+    // Salva indirizzo "raw" come query per Maps
+    var query=clean.replace(/"/g,'&quot;');
+    return '<span class="addr-link" contenteditable="false" data-addr="'+query+'" title="Tocca per aprire mappa">'+clean+'</span>'+match.substring(clean.length);
+  });
+}
+
+var addrModalQuery='';        // testo indirizzo corrente
+var addrModalSpan=null;       // span .addr-link cliccato
+var addrEditMode=false;
+
+function isMobileDevice(){
+  return /android|iphone|ipad|ipod|mobile/i.test(navigator.userAgent||'');
+}
+
+function openAddrModal(query,spanEl){
+  if(document.activeElement&&document.activeElement.blur){try{document.activeElement.blur();}catch(_){}}
+  addrModalQuery=query;
+  addrModalSpan=spanEl||null;
+  setAddrViewMode();
+  var view=document.getElementById('maddrText');
+  var inp=document.getElementById('maddrInput');
+  if(view)view.textContent=query;
+  if(inp)inp.value=query;
+  // Mostra/nascondi pulsante "Naviga" in base al device
+  var btnNav=document.getElementById('btnAddrNav');
+  if(btnNav)btnNav.style.display=isMobileDevice()?'inline-flex':'none';
+  apri('maddr');
+}
+
+function setAddrViewMode(){
+  addrEditMode=false;
+  var v=document.getElementById('maddrText');
+  var i=document.getElementById('maddrInput');
+  var er=document.getElementById('maddrErr');
+  var t=document.getElementById('maddrTitle');
+  var lbl=document.getElementById('addrEditLabel');
+  var ico=document.getElementById('addrEditIco');
+  if(v)v.style.display='';
+  if(i)i.style.display='none';
+  if(er)er.style.display='none';
+  if(t)t.textContent='Indirizzo';
+  if(lbl)lbl.textContent='Modifica';
+  if(ico)ico.innerHTML='<path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>';
+}
+
+function setAddrEditMode(){
+  addrEditMode=true;
+  var v=document.getElementById('maddrText');
+  var i=document.getElementById('maddrInput');
+  var er=document.getElementById('maddrErr');
+  var t=document.getElementById('maddrTitle');
+  var lbl=document.getElementById('addrEditLabel');
+  var ico=document.getElementById('addrEditIco');
+  if(v)v.style.display='none';
+  if(er)er.style.display='none';
+  if(t)t.textContent='Modifica indirizzo';
+  if(lbl)lbl.textContent='Conferma';
+  if(ico)ico.innerHTML='<polyline points="20 6 9 17 4 12"/>';
+  if(i){
+    i.style.display='';
+    setTimeout(function(){
+      i.focus();
+      try{i.setSelectionRange(i.value.length,i.value.length);}catch(_){}
+    },50);
+  }
+}
+
+function commitAddrEdit(){
+  var inp=document.getElementById('maddrInput');
+  var er=document.getElementById('maddrErr');
+  if(!inp)return null;
+  var raw=(inp.value||'').trim();
+  if(raw.length<3){
+    if(er){er.textContent='Indirizzo troppo breve';er.style.display='block';}
+    return null;
+  }
+  if(er)er.style.display='none';
+  if(addrModalSpan&&addrModalSpan.parentNode){
+    addrModalSpan.textContent=raw;
+    addrModalSpan.dataset.addr=raw;
+    var tr=addrModalSpan.closest('tr');
+    if(tr)markDirty(tr);
+  }
+  addrModalQuery=raw;
+  var view=document.getElementById('maddrText');
+  if(view)view.textContent=raw;
+  return raw;
+}
+
+function closeAddrModal(){
+  chiudi('maddr');
+  setAddrViewMode();
+  addrModalSpan=null;
+}
+
+function openInGoogleMaps(query){
+  var url='https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(query);
+  // Riusa la finestra "guardia-medica-maps" se aperta
+  openExternalLink(url,'guardia-medica-maps');
+}
+
+function openInDeviceNavigator(query){
+  // Su iOS: maps:?q= apre Apple Maps. Android: geo:0,0?q= apre il navigator default
+  var enc=encodeURIComponent(query);
+  if(/iphone|ipad|ipod/i.test(navigator.userAgent||'')){
+    window.location.href='maps://?q='+enc;
+  } else {
+    window.location.href='geo:0,0?q='+enc;
+  }
+}
 
 function openPhoneModal(num,spanEl){
   // Forza blur dell'elemento attivo per chiudere la tastiera mobile
@@ -3135,7 +3302,7 @@ function relinkifyRow(tr){
     if(!cell)return;
     if(document.activeElement===cell)return; // l'utente sta editando, non toccare
     var raw=cell.innerText||'';
-    var newHtml=linkifyPhones(esc(raw));
+    var newHtml=linkifyAddresses(linkifyPhones(esc(raw)));
     if(newHtml!==cell.innerHTML)cell.innerHTML=newHtml;
   });
 }
