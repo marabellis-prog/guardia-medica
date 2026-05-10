@@ -3102,13 +3102,16 @@ var phoneEditMode=false;
 // ───────────────────────────────────────────────────────────
 var ADDR_TOPONIMI = '(?:via|viale|v\\.?le|vl\\.?|piazza|p\\.?zza|p\\.?za|pza|piazzale|p\\.?le|p\\.?zle|piazzetta|corso|c\\.?so|cso|largo|l\\.?go|lgo|vicolo|v\\.?lo|vlo|vicoletto|vico|salita|sal\\.?|strada|str\\.?|s\\.?da|stradella|stradello|stradina|traversa|trav\\.?|loc\\.?|localit[aà]|loc\\.?t[aà]|lungomare|lungolago|lungoargine|lungofiume|lungo(?=tevere|po|adige)|circonvallazione|circ\\.?ne|circondario|contrada|c\\.?da|contr[aà]|chiasso|campiello|calle|campo|carraia|carrarone|frazione|fraz\\.?|giardino|maso|parallela|passeggiata|pass\\.?ta|rotonda|vietta|viottolo|viuzza|viuzzo|discesa|disc\\.?|diga|borgo|borg\\.?|rione|prato|prati|riviera|spianata|terrazza|via\\.?le|cosentina|panoramica)';
 
+// Stop words: parole che indicano "non è città/frazione, è descrizione medica"
+// Se compaiono come prima parola dopo virgola in minuscolo → tronca
+var ADDR_STOP_WORDS = /^(?:paziente|pazienti|paz|anzian[oaie]|cosciente|incosciente|bambin[oaie]|figli[oaie]|signor[ae]?|signora|problema|problemi|richiesta|richiede|prescrizione|prescriv[ei]|prescritt[oa]|ricetta|ricette|recente|visita|visit[ei]|febbre|febbrile|dolore|dolori|nausea|sintom[oi]|crisi|accesso|consulenz[ae]|terapia|terapie|farmac[oi]|emergenz[ae]|urgenz[ae]|ricontatt[ai]|richiam[ai]|ricovero|ospedale|118|cf|tel|cellulare|cell|email|mail|np|prognosi|allerg[ie]|sospett[oa]|tampon[ei]|prelievo|esami|esame|certificato|cert|continuazione|terapista|fisioterap|infermier[ei]|caregiver|badante|trattamento|farmaco)\b/i;
+
 // Determina dove finisce l'indirizzo nel match. Logica:
-//   - Match generoso fino a newline/punto-virgola/<.
-//   - Le virgole NON terminano l'indirizzo SE la parte dopo
-//     inizia con cifra (civico/CAP) o maiuscola (città/frazione).
-//   - Se inizia con minuscola (probabile descrizione del paziente) → stop.
-//   - Tronca prima di parole rumore post-indirizzo (interno, scala, ...).
-//   - Tronca a fine frase (". " seguito da maiuscola).
+//   - Cifra dopo virgola (civico/CAP) → include
+//   - Maiuscola dopo virgola (città capitalizzata) → include
+//   - Minuscola dopo virgola → include MA SOLO se NON è stop word medica
+//     e il chunk post-virgola è breve (≤30 chars, ≤3 parole)
+//   - Tronca prima di parole rumore (interno, scala, ...) o fine frase (". X")
 function computeAddressEnd(text){
   var len=text.length, idx=0;
   while(true){
@@ -3117,10 +3120,22 @@ function computeAddressEnd(text){
     var after=text.substring(c+1).replace(/^\s+/,'');
     if(!after){idx=c;break;}
     var fc=after.charAt(0);
-    if(/[\dA-ZÀ-Ü]/.test(fc)){idx=c+1;}
-    else{idx=c;break;}
+    if(/[\dA-ZÀ-Ü]/.test(fc)){
+      idx=c+1;
+    } else if(/[a-zà-ÿ]/.test(fc)){
+      // Minuscola: includi SOLO se non sembra descrizione medica
+      var firstWord=after.match(/^[\wà-ÿ]+/);
+      var chunk=after.match(/^[^,;\n]*/)[0];
+      if(firstWord && !ADDR_STOP_WORDS.test(firstWord[0]) && chunk.length<=30){
+        var words=chunk.trim().split(/\s+/);
+        if(words.length<=3){idx=c+1;continue;}
+      }
+      idx=c;break;
+    } else {
+      idx=c;break;
+    }
   }
-  // Tronca a parole rumore (preserve l'inizio = match toponimo, cerca solo dopo)
+  // Tronca a parole rumore post-indirizzo (interno, scala, ecc.)
   var noiseRe=/\s+(?:int(?:erno|\.)?|sc(?:ala|\.)?|pal(?:azzo|\.)?|piano|edif(?:icio|\.)?|cit(?:ofono|\.)?|civ(?:ico|\.)?|tel(?:efono|\.)?|ingresso|portone|cell(?:ulare|\.)?|presso|c\/o)\b/i;
   var noise=text.substring(0,idx).match(noiseRe);
   if(noise&&noise.index>5)idx=noise.index;
