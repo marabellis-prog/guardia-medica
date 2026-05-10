@@ -249,6 +249,8 @@
       </div>
     </div>
 
+    <div class="girate-banner" id="girateBanner" style="display:none"></div>
+
     <div class="srch-panel" id="srchPanel">
       <div class="srch-quick" style="display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:1rem">
         <button type="button" class="qchip" data-range="today">Oggi</button>
@@ -710,6 +712,47 @@
       <button class="bconf" id="btnAddrMaps" type="button">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>
         Apri Maps
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal selezione collega per Gira -->
+<div class="mov" id="mgira">
+  <div class="mbox" style="max-width:480px;width:min(94vw,480px);text-align:left">
+    <div class="mtit" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:.4rem">
+      <span style="display:flex;align-items:center;gap:.5rem">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+        Gira chiamata
+      </span>
+      <button class="ibtn" id="btnGiraClose" type="button" title="Chiudi">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="mmsg" style="text-align:left;max-width:none">
+      Seleziona il collega a cui vuoi girare la chiamata. Riceverà una notifica e potrà accettare o rifiutare.
+    </div>
+    <div id="giraCallPreview" style="margin-top:.85rem;padding:.65rem .85rem;border-radius:8px;background:var(--surface2);font-size:.85rem;color:var(--txm);max-height:120px;overflow-y:auto;white-space:pre-wrap;word-break:break-word"></div>
+    <div id="giraColleghiList" style="margin-top:1rem;max-height:50vh;overflow-y:auto;border:1px solid var(--bord);border-radius:12px;background:var(--surface2)"></div>
+    <div class="mac" style="margin-top:14px">
+      <button class="bcan" id="btnGiraCancel" type="button">Annulla</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal conferma gira (doppia conferma) -->
+<div class="mov" id="mgiraConf">
+  <div class="mbox">
+    <div class="mic wa">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+    </div>
+    <div class="mtit">Confermi l'invio?</div>
+    <div class="mmsg" id="mgiraConfMsg"></div>
+    <div class="mac">
+      <button class="bcan" id="btnGiraConfCancel" type="button">Annulla</button>
+      <button class="bconf" id="btnGiraConfOk" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        Invia
       </button>
     </div>
   </div>
