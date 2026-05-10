@@ -3087,16 +3087,21 @@ var phoneEditMode=false;
 
 // ───────────────────────────────────────────────────────────
 // CLICK-TO-MAP: trasforma indirizzi italiani in link
+// Lista completa toponomastica italiana (Treccani + Wikipedia)
 // ───────────────────────────────────────────────────────────
+var ADDR_TOPONIMI = '(?:via|viale|v\\.?le|vl\\.?|piazza|p\\.?zza|p\\.?za|pza|piazzale|p\\.?le|p\\.?zle|piazzetta|corso|c\\.?so|cso|largo|l\\.?go|lgo|vicolo|v\\.?lo|vlo|vicoletto|vico|salita|sal\\.?|strada|str\\.?|s\\.?da|stradella|stradello|stradina|traversa|trav\\.?|loc\\.?|localit[aà]|loc\\.?t[aà]|lungomare|lungolago|lungoargine|lungofiume|lungo(?=tevere|po|adige)|circonvallazione|circ\\.?ne|circondario|contrada|c\\.?da|contr[aà]|chiasso|campiello|calle|campo|carraia|carrarone|frazione|fraz\\.?|giardino|maso|parallela|passeggiata|pass\\.?ta|rotonda|vietta|viottolo|viuzza|viuzzo|discesa|disc\\.?|diga|borgo|borg\\.?|rione|prato|prati|riviera|spianata|terrazza|via\\.?le|cosentina|panoramica)';
+
 function linkifyAddresses(html){
-  // Match: prefisso indirizzo italiano + nome strada + opz numero civico
-  // Si ferma a virgola, punto e virgola, newline, fine stringa o "<" (tag HTML)
-  var re=/\b(?:via|viale|v\.le|piazza|p\.zza|p\.za|piazzale|corso|c\.so|largo|vicolo|salita|strada|loc\.|localit[aà])\b[^,;\n<]{2,80}/gi;
+  // Match: toponimo + separatore + almeno una parola/numero + fino a virgola/newline/EOL
+  var re = new RegExp('\\b' + ADDR_TOPONIMI + '\\.?[\\s.]+\\w[^,;\\n<]{0,90}', 'gi');
   return html.replace(re,function(match){
-    // Pulisci trailing whitespace/punteggiatura
+    // Pulisci trailing whitespace/punteggiatura non utile
     var clean=match.replace(/[\s.]+$/,'').trim();
-    if(clean.length<6)return match; // troppo corto, probabile falso positivo
-    // Salva indirizzo "raw" come query per Maps
+    if(clean.length<6)return match;
+    // Tronca prima di parole "rumore" tipiche post-indirizzo
+    // (interno, scala, palazzo, piano, edificio, citofono, civico, telefono)
+    clean=clean.replace(/\s+(?:int(?:erno|\.|\s)|sc(?:ala|\.|\s)|pal(?:azzo|\.|\s)|piano|edif(?:icio|\.|\s)|cit(?:ofono|\.|\s)|civ(?:ico|\.|\s)|tel(?:efono|\.|\s)|ingresso|portone|cell(?:ulare|\.|\s)|presso|c\/o)\b.*$/i,'');
+    if(clean.length<6)return match;
     var query=clean.replace(/"/g,'&quot;');
     return '<span class="addr-link" contenteditable="false" data-addr="'+query+'" title="Tocca per aprire mappa">'+clean+'</span>'+match.substring(clean.length);
   });
