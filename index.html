@@ -175,11 +175,13 @@
 </header>
 
 <main class="main">
-  <div class="fc">
-    <div class="fch">
+  <div class="fc" id="newCallCard">
+    <div class="fch" id="newCallHeader" role="button" aria-expanded="true" aria-controls="newCallBody">
       <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--pr)" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
       <span class="fcht">Nuova Chiamata</span>
+      <svg class="fch-chevron" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
     </div>
+    <div id="newCallBody">
     <div class="ftr">
       <button class="badd" id="btnAdd" title="Registra data e ora">+</button>
       <select class="selp" id="selPost"><option value="">— Postazione —</option></select>
@@ -191,7 +193,7 @@
     <div class="ffs">
       <div class="fg">
         <label class="fl" for="txd">Descrizione<span class="req">*</span></label>
-        <textarea class="fta" id="txd" placeholder="Tipo richiesta&#10;Nome paziente età&#10;Indirizzo&#10;Telefono/i&#10;Descrizione" rows="4" maxlength="5000"></textarea>
+        <textarea class="fta" id="txd" placeholder="Tipo richiesta&#10;Nome paziente età&#10;Indirizzo&#10;Telefono/i&#10;Descrizione" rows="6" maxlength="5000"></textarea>
         <span class="fem" id="errd" style="display:none">Campo obbligatorio</span>
       </div>
       <div class="fg">
@@ -206,6 +208,7 @@
         Salva
       </button>
     </div>
+    </div><!-- /#newCallBody -->
   </div>
 
   <div>
