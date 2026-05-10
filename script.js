@@ -234,6 +234,8 @@ async function setupAuth(){
   syncProcess();
   autoPurgeOld();
   refreshTrashBadge();
+  // GIRA CHIAMATA: carica pending + attiva realtime sul canale girate
+  setupGirate();
 }
 
 async function authSignInWithGoogle(forceAccountChoice){
@@ -1237,6 +1239,11 @@ document.addEventListener('DOMContentLoaded',function(){
 
   // Badge "in coda di sync" è basato su localStorage, non richiede auth
   syncRenderBadge();
+
+  // GIRA CHIAMATA: wiring dei modali e del banner (delegation)
+  setupGirateBannerDelegation();
+  setupGirateModalsDelegation();
+
   // Le altre operazioni (syncProcess, autoPurgeOld, refreshTrashBadge)
   // richiedono JWT e vengono lanciate dentro setupAuth dopo il login.
 });
@@ -1418,7 +1425,17 @@ function searchChiamate(filters){
     return res.json().then(function(data){return {data:data,total:total};});
   }).then(function(result){
     var records=result.data.map(function(r){
-      return {id:r.id,rowIndex:r.id,tsFormatted:formatTSFromISO(r.timestamp_chiamata),postazione:r.postazione||'',descrizione:r.descrizione||'',note:r.note||'',completato:!!r.completato};
+      return {
+        id:r.id,rowIndex:r.id,
+        tsFormatted:formatTSFromISO(r.timestamp_chiamata),
+        postazione:r.postazione||'',descrizione:r.descrizione||'',note:r.note||'',completato:!!r.completato,
+        girata_a_user_id:r.girata_a_user_id||null,
+        girata_a_nome:r.girata_a_nome||'',
+        girata_a_at:r.girata_a_at||null,
+        girata_da_user_id:r.girata_da_user_id||null,
+        girata_da_nome:r.girata_da_nome||'',
+        girata_da_at:r.girata_da_at||null
+      };
     });
     return {records:records,total:result.total};
   });
@@ -1651,7 +1668,17 @@ function loadRows(pg){
   }).then(function(result){
     hideLoader();
     var records=result.data.map(function(r){
-      return {id:r.id,rowIndex:r.id,tsFormatted:formatTSFromISO(r.timestamp_chiamata),postazione:r.postazione||'',descrizione:r.descrizione||'',note:r.note||'',completato:!!r.completato};
+      return {
+        id:r.id,rowIndex:r.id,
+        tsFormatted:formatTSFromISO(r.timestamp_chiamata),
+        postazione:r.postazione||'',descrizione:r.descrizione||'',note:r.note||'',completato:!!r.completato,
+        girata_a_user_id:r.girata_a_user_id||null,
+        girata_a_nome:r.girata_a_nome||'',
+        girata_a_at:r.girata_a_at||null,
+        girata_da_user_id:r.girata_da_user_id||null,
+        girata_da_nome:r.girata_da_nome||'',
+        girata_da_at:r.girata_da_at||null
+      };
     });
     drawRows(records,null);
     drawPgn(result.total,pg,CURRENT_PAGE_SIZE);
@@ -1678,6 +1705,12 @@ function drawRows(recs,highlightQuery){
     tb.innerHTML='<tr><td colspan="5"><div class="emp"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><h3>'+(currentFilters?'Nessun risultato':'Nessuna chiamata')+'</h3><p>'+(currentFilters?'Prova a modificare i criteri di ricerca.':'Premi «+» per registrare la prima chiamata.')+'</p></div></td></tr>';
     return;
   }
+  // Pre-calcola pendingGirate map per chiamata_origine_id (outgoing pending)
+  var outgoingPendingMap = {};
+  (pendingGirate.outgoing||[]).forEach(function(g){
+    if(g.chiamata_origine_id) outgoingPendingMap[g.chiamata_origine_id] = g;
+  });
+
   tb.innerHTML=recs.map(function(r){
     var tsf=r.tsFormatted||'';
     var parts=tsf.split(' ');
@@ -1687,16 +1720,50 @@ function drawRows(recs,highlightQuery){
       return '<div class="post-opt" data-nome="'+esc(p.nome)+'" data-colore="'+esc(p.colore||'#2e7d5e')+'">'
         +'<span class="post-dot" style="background:'+esc(p.colore||'#2e7d5e')+'"></span>'+esc(p.nome)+'</div>';
     }).join('');
+
+    // Badge "Girata a/da"
+    var girataBadge = '';
+    if(r.girata_a_nome){
+      // Sono il mittente, già accettata dal collega
+      girataBadge = '<span class="girata-badge" contenteditable="false" title="Girata accettata">'
+        +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/></svg>'
+        +'Girata a '+esc(r.girata_a_nome)+(r.girata_a_at?' · '+esc(formatTSFromISO(r.girata_a_at)):'')
+      +'</span>';
+    } else if(r.girata_da_nome){
+      // Sono il destinatario: chiamata accettata da me
+      girataBadge = '<span class="girata-badge from" contenteditable="false" title="Ricevuta da collega">'
+        +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>'
+        +'Da '+esc(r.girata_da_nome)+(r.girata_da_at?' · '+esc(formatTSFromISO(r.girata_da_at)):'')
+      +'</span>';
+    } else if(outgoingPendingMap[r.id]){
+      // Girata in corso (pending) — io sono il mittente
+      var p = outgoingPendingMap[r.id];
+      girataBadge = '<span class="girata-badge pending" contenteditable="false" title="In attesa di accettazione">'
+        +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+        +'In attesa: '+esc(p.to_user_nome||'collega')
+      +'</span>';
+    }
+
     var descHtml=linkifyAddresses(linkifyPhones(highlightQuery?highlight(r.descrizione||'',highlightQuery):esc(r.descrizione||'')));
     var noteHtml=linkifyAddresses(linkifyPhones(highlightQuery?highlight(r.note||'',highlightQuery):esc(r.note||'')));
     var si=r.completato
       ?'<div class="ich"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>'
       :'<div class="iho" data-row="'+r.id+'"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg></div>';
+
+    // Bottone Gira: solo per chiamate non completate, non già girate (accettate), non in pending
+    var giraBtn = '';
+    var canGirare = !r.completato && !r.girata_a_user_id && !outgoingPendingMap[r.id];
+    if(canGirare){
+      giraBtn = '<div class="iho-gira" data-row="'+r.id+'" data-desc="'+esc((r.descrizione||'').substring(0,140))+'" title="Gira la chiamata a un collega">'
+        + svgGira()
+      + '</div>';
+    }
+
     var cestino='<div class="idel" data-row="'+r.id+'" data-desc="'+esc((r.descrizione||'').substring(0,50))+'" title="Click per eliminare">'
       +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
       +'</div>';
     return '<tr class="'+(r.completato?'done':'pending')+'" data-row="'+r.id+'" data-original-ts="'+esc(tsf)+'">'
-      +'<td class="tds"><div class="sc">'+si+'<div class="isv" data-row="'+r.id+'" style="display:none">'+svgFloppy()+'</div>'+cestino+'</div></td>'
+      +'<td class="tds"><div class="sc">'+si+'<div class="isv" data-row="'+r.id+'" style="display:none">'+svgFloppy()+'</div>'+giraBtn+cestino+'</div></td>'
       +'<td class="tid">'+r.id+'</td>'
       +'<td class="tdt"><div class="dt-wrap">'
         +'<span class="dt-date" contenteditable="true" data-field="dt-date" spellcheck="false">'+esc(ds)+'</span>'
@@ -1707,7 +1774,7 @@ function drawRows(recs,highlightQuery){
           +'<div class="post-dropdown">'+ddOpts+'</div>'
         +'</span>'
       +'</div></td>'
-      +'<td data-field="descrizione" contenteditable="true" spellcheck="false" style="white-space:pre-wrap;min-width:180px">'+descHtml+'</td>'
+      +'<td data-field="descrizione" contenteditable="true" spellcheck="false" style="white-space:pre-wrap;min-width:180px">'+girataBadge+(girataBadge?'<br>':'')+descHtml+'</td>'
       +'<td data-field="note" contenteditable="true" spellcheck="false" style="white-space:pre-wrap">'+noteHtml+'</td>'
       +'</tr>';
   }).join('');
@@ -1822,8 +1889,8 @@ function cancelAutosave(rowId){
 function silentAutoSave(tr,rowId){
   if(!validateDateTimeFields(tr))return; // se data/ora invalida, già mostra warning
   var po=tr.querySelector('[data-field="postazione"]')?tr.querySelector('[data-field="postazione"]').dataset.nome||'':'';
-  var de=sanitizeText((tr.querySelector('[data-field="descrizione"]')||{innerText:''}).innerText.trim());
-  var no=sanitizeText((tr.querySelector('[data-field="note"]')||{innerText:''}).innerText.trim());
+  var de=sanitizeText(getCellTextNoBadge(tr,'descrizione'));
+  var no=sanitizeText(getCellTextNoBadge(tr,'note'));
   var tsNow=getFormattedTs(tr);
   var body={postazione:po,descrizione:de,note:no};
   var tsISO=italianToISO(tsNow);if(tsISO)body.timestamp_chiamata=tsISO;
@@ -1866,8 +1933,8 @@ function silentAutoSave(tr,rowId){
 function buildPatchBodyFromRow(tr){
   if(!tr)return null;
   var po=tr.querySelector('[data-field="postazione"]')?tr.querySelector('[data-field="postazione"]').dataset.nome||'':'';
-  var de=sanitizeText((tr.querySelector('[data-field="descrizione"]')||{innerText:''}).innerText.trim());
-  var no=sanitizeText((tr.querySelector('[data-field="note"]')||{innerText:''}).innerText.trim());
+  var de=sanitizeText(getCellTextNoBadge(tr,'descrizione'));
+  var no=sanitizeText(getCellTextNoBadge(tr,'note'));
   var tsNow=getFormattedTs(tr);
   var body={postazione:po,descrizione:de,note:no};
   var tsISO=italianToISO(tsNow);if(tsISO)body.timestamp_chiamata=tsISO;
@@ -1913,6 +1980,25 @@ function setupTableDelegation(){
       openAddrModal(addr.dataset.addr||addr.textContent,addr);
       return;
     }
+    var giraEl=t.closest('.iho-gira');
+    if(giraEl){
+      e.stopPropagation();
+      var rowId=parseInt(giraEl.dataset.row);
+      var trGira=giraEl.closest('tr');
+      // Costruisci preview testuale (data · postazione · descrizione breve)
+      var when='', post='', desc='';
+      if(trGira){
+        var origTs = trGira.dataset.originalTs || '';
+        when = origTs;
+        var ptg = trGira.querySelector('.ptag');
+        post = ptg ? (ptg.dataset.nome||'') : '';
+        desc = getCellTextNoBadge(trGira, 'descrizione').substring(0,200);
+      }
+      var preview = (when?when+' · ':'')+(post?post+'\n':'')+desc;
+      openGiraModal(rowId, preview);
+      return;
+    }
+
     var iho=t.closest('.iho');
     if(iho){startCompleta(iho.closest('tr'),parseInt(iho.dataset.row));return;}
 
@@ -2072,6 +2158,22 @@ function triggerDirtyWarning(){
 // TIMESTAMP FORM
 // ═══════════════════════════════════════════════════════════════════
 
+// Restituisce innerText della cella escludendo eventuali .girata-badge
+// (così il badge "Girata a/da X" non finisce nel testo salvato su DB)
+function getCellTextNoBadge(tr, field){
+  if(!tr) return '';
+  var cell = tr.querySelector('[data-field="'+field+'"]');
+  if(!cell) return '';
+  var clone = cell.cloneNode(true);
+  var badges = clone.querySelectorAll('.girata-badge');
+  badges.forEach(function(b){
+    var nx = b.nextSibling;
+    if(nx && nx.nodeType===1 && nx.tagName==='BR') nx.parentNode.removeChild(nx);
+    b.parentNode.removeChild(b);
+  });
+  return (clone.innerText||'').trim();
+}
+
 function getFormattedTs(tr){
   var dateEl=tr.querySelector('[data-field="dt-date"]');
   var timeEl=tr.querySelector('[data-field="dt-time"]');
@@ -2098,8 +2200,8 @@ function saveEdit(info,floppyEl,onDone){
   var tr=info.tr,ri=info.rowIndex;
   if(!floppyEl)floppyEl=tr.querySelector('.isv');
   var po=tr.querySelector('[data-field="postazione"]')?tr.querySelector('[data-field="postazione"]').dataset.nome||'':'';
-  var de=sanitizeText((tr.querySelector('[data-field="descrizione"]')||{innerText:''}).innerText.trim());
-  var no=sanitizeText((tr.querySelector('[data-field="note"]')||{innerText:''}).innerText.trim());
+  var de=sanitizeText(getCellTextNoBadge(tr,'descrizione'));
+  var no=sanitizeText(getCellTextNoBadge(tr,'note'));
   var tsNow=getFormattedTs(tr);
   if(!validateDateTimeFields(tr))return;
   if(floppyEl){floppyEl.style.display='flex';floppyEl.classList.add('saving');floppyEl.innerHTML='<div class="spin-dark"></div>';}
@@ -2153,8 +2255,8 @@ function saveAllDirty(cb,opts){
   var promises=keys.map(function(k){
     var info=dirtyMap[k],tr=info.tr,ri=info.rowIndex;
     var po=tr.querySelector('[data-field="postazione"]')?tr.querySelector('[data-field="postazione"]').dataset.nome||'':'';
-    var de=sanitizeText((tr.querySelector('[data-field="descrizione"]')||{innerText:''}).innerText.trim());
-    var no=sanitizeText((tr.querySelector('[data-field="note"]')||{innerText:''}).innerText.trim());
+    var de=sanitizeText(getCellTextNoBadge(tr,'descrizione'));
+    var no=sanitizeText(getCellTextNoBadge(tr,'note'));
     var tsNow=getFormattedTs(tr);
     var floppyEl=silent?null:tr.querySelector('.isv');
     if(floppyEl){floppyEl.classList.add('saving');floppyEl.innerHTML='<div class="spin-dark"></div>';}
@@ -2191,8 +2293,8 @@ function confCompleta(){
   var hg=tr.querySelector('.iho');
   if(hg){hg.classList.add('loading');hg.innerHTML='<div class="spin-dark"></div>';}
   var po=tr.querySelector('[data-field="postazione"]')?tr.querySelector('[data-field="postazione"]').dataset.nome||'':'';
-  var de=sanitizeText((tr.querySelector('[data-field="descrizione"]')||{innerText:''}).innerText.trim());
-  var no=sanitizeText((tr.querySelector('[data-field="note"]')||{innerText:''}).innerText.trim());
+  var de=sanitizeText(getCellTextNoBadge(tr,'descrizione'));
+  var no=sanitizeText(getCellTextNoBadge(tr,'note'));
   var tsNow=getFormattedTs(tr);
   if(!validateDateTimeFields(tr))return;
   var body={postazione:po,descrizione:de,note:no,completato:true};
@@ -2773,6 +2875,8 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('madmin'))chiudi('madmin');
   if(e.target===document.getElementById('madminAdd'))chiudi('madminAdd');
   if(e.target===document.getElementById('madminDel')){chiudi('madminDel');adminUserToDelete=null;}
+  if(e.target===document.getElementById('mgira'))closeGiraModal();
+  if(e.target===document.getElementById('mgiraConf')){chiudi('mgiraConf');pendingGiraToUser=null;}
 });
 
 
@@ -3197,6 +3301,408 @@ function linkifyAddresses(html){
   });
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+// GIRA CHIAMATA: forward call to a colleague
+// - SELECT su girate (RLS: vedo solo le mie, in entrambe le direzioni)
+// - Mutazioni via RPC SECURITY DEFINER (gira/accetta/rifiuta/annulla)
+// - Realtime su INSERT/UPDATE girate filtrato per to_user_id e from_user_id
+// - Audio + vibrazione su nuova richiesta in arrivo (non al boot)
+// ═══════════════════════════════════════════════════════════════════
+
+var pendingGirate = { incoming: [], outgoing: [] };
+var colleghiCache = null;
+var girateChannel1 = null, girateChannel2 = null;
+var girateInitialLoadDone = false; // dopo il boot iniziale, gli INSERT triggerano audio
+var pendingGiraCallId = null;       // chiamata selezionata in attesa di scelta collega
+var pendingGiraToUser = null;       // collega selezionato in attesa di conferma
+
+function setupGirate(){
+  // Dopo login: carica girate pending, attiva realtime
+  fetchPendingGirate().then(function(){
+    girateInitialLoadDone = true;
+  });
+  setupGirateRealtime();
+}
+
+function fetchPendingGirate(){
+  if(!currentUser || !currentUser.id) return Promise.resolve();
+  // Prendo TUTTE le pending in cui sono coinvolto (in entrambe le direzioni)
+  // RLS già filtra: vedo solo girate con from_user=me o to_user=me
+  var url = 'girate?select=*&status=eq.pending&order=created_at.desc';
+  return sbFetch(url).then(function(res){return res.json();}).then(function(data){
+    if(!Array.isArray(data)){pendingGirate={incoming:[],outgoing:[]};renderGirateBanner();return;}
+    var inc = [], out = [];
+    data.forEach(function(g){
+      if(g.to_user_id === currentUser.id) inc.push(g);
+      else if(g.from_user_id === currentUser.id) out.push(g);
+    });
+    pendingGirate.incoming = inc;
+    pendingGirate.outgoing = out;
+    renderGirateBanner();
+  }).catch(function(){
+    pendingGirate = {incoming:[], outgoing:[]};
+    renderGirateBanner();
+  });
+}
+
+function renderGirateBanner(){
+  var b = document.getElementById('girateBanner');
+  if(!b) return;
+  var inc = pendingGirate.incoming || [];
+  var out = pendingGirate.outgoing || [];
+  if(!inc.length && !out.length){ b.style.display='none'; b.innerHTML=''; return; }
+  var html = '';
+
+  if(inc.length){
+    html += '<div class="girate-banner-section">';
+    html += '<div class="girate-banner-title">'
+      + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>'
+      + (inc.length===1?'1 chiamata in arrivo':inc.length+' chiamate in arrivo')
+      + '</div>';
+    inc.forEach(function(g){
+      var when = formatTSFromISO(g.snapshot_ts) || '';
+      var post = esc(g.snapshot_postazione || '—');
+      var fromName = esc(g.from_user_nome || 'Collega');
+      var sentAt = formatTSFromISO(g.created_at) || '';
+      var desc = esc((g.snapshot_descrizione || '').substring(0,200))
+               + ((g.snapshot_descrizione||'').length>200?'…':'');
+      html += '<div class="girate-card">'
+        + '<div class="girate-card-info">'
+        +   '<div class="girate-card-meta">Da <b>'+fromName+'</b> · inviata '+esc(sentAt)+'</div>'
+        +   '<div class="girate-card-meta" style="font-weight:500">Chiamata del '+esc(when)+' · '+post+'</div>'
+        +   '<div class="girate-card-desc">'+desc+'</div>'
+        + '</div>'
+        + '<div class="girate-card-actions">'
+        +   '<button type="button" class="girate-btn reject" data-action="reject" data-id="'+esc(g.id)+'">'
+        +     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>'
+        +     'Rifiuta'
+        +   '</button>'
+        +   '<button type="button" class="girate-btn accept" data-action="accept" data-id="'+esc(g.id)+'">'
+        +     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>'
+        +     'Accetta'
+        +   '</button>'
+        + '</div>'
+      + '</div>';
+    });
+    html += '</div>';
+  }
+
+  if(out.length){
+    html += '<div class="girate-banner-section">';
+    html += '<div class="girate-banner-title">'
+      + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/></svg>'
+      + (out.length===1?'1 girata in attesa di accettazione':out.length+' girate in attesa di accettazione')
+      + '</div>';
+    out.forEach(function(g){
+      var when = formatTSFromISO(g.snapshot_ts) || '';
+      var post = esc(g.snapshot_postazione || '—');
+      var toName = esc(g.to_user_nome || 'Collega');
+      var sentAt = formatTSFromISO(g.created_at) || '';
+      var desc = esc((g.snapshot_descrizione || '').substring(0,200))
+               + ((g.snapshot_descrizione||'').length>200?'…':'');
+      html += '<div class="girate-card">'
+        + '<div class="girate-card-info">'
+        +   '<div class="girate-card-meta">A <b>'+toName+'</b> · inviata '+esc(sentAt)+'</div>'
+        +   '<div class="girate-card-meta" style="font-weight:500">Chiamata del '+esc(when)+' · '+post+'</div>'
+        +   '<div class="girate-card-desc">'+desc+'</div>'
+        + '</div>'
+        + '<div class="girate-card-actions">'
+        +   '<span class="girate-pending-tag">'
+        +     '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+        +     'In attesa'
+        +   '</span>'
+        +   '<button type="button" class="girate-btn cancel" data-action="cancel" data-id="'+esc(g.id)+'">'
+        +     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>'
+        +     'Annulla invio'
+        +   '</button>'
+        + '</div>'
+      + '</div>';
+    });
+    html += '</div>';
+  }
+
+  b.innerHTML = html;
+  b.style.display = '';
+}
+
+function setupGirateRealtime(){
+  if(!currentUser || !currentUser.id) return;
+  getSupabaseClient().then(function(client){
+    // Canale 1: incoming (to_user_id = me) — INSERT triggera audio
+    girateChannel1 = client.channel('girate-incoming-'+currentUser.id)
+      .on('postgres_changes', {
+        event:'*', schema:'public', table:'girate',
+        filter:'to_user_id=eq.'+currentUser.id
+      }, function(payload){
+        handleGirateRealtimeEvent(payload, 'incoming');
+      })
+      .subscribe();
+
+    // Canale 2: outgoing (from_user_id = me) — UPDATE triggera refresh banner (accept/reject del collega)
+    girateChannel2 = client.channel('girate-outgoing-'+currentUser.id)
+      .on('postgres_changes', {
+        event:'*', schema:'public', table:'girate',
+        filter:'from_user_id=eq.'+currentUser.id
+      }, function(payload){
+        handleGirateRealtimeEvent(payload, 'outgoing');
+      })
+      .subscribe();
+  }).catch(function(){/* niente realtime, ma fetchPendingGirate continuerà su poll? Per ora skip */});
+}
+
+function handleGirateRealtimeEvent(payload, direction){
+  var ev = payload.eventType || payload.event;
+  var newRow = payload.new || {};
+  var oldRow = payload.old || {};
+
+  // Refresh sempre il banner per riflettere lo stato corrente
+  fetchPendingGirate();
+
+  // Audio + vibrazione SOLO per nuove richieste in arrivo (incoming INSERT pending)
+  if(direction === 'incoming' && ev === 'INSERT' && newRow.status === 'pending' && girateInitialLoadDone){
+    playGirataSound();
+    vibrateGirata();
+    fb(true, 'Nuova chiamata', 'Hai ricevuto una chiamata da '+(newRow.from_user_nome||'un collega'));
+  }
+
+  // Outgoing accettato → ricarica la lista per mostrare il badge "Girata a X"
+  if(direction === 'outgoing' && ev === 'UPDATE' && newRow.status === 'accepted' && oldRow.status === 'pending'){
+    fb(true, 'Accettata', (newRow.to_user_nome||'Il collega')+' ha accettato la chiamata');
+    loadRows(PAGE);
+  }
+
+  // Outgoing rifiutato → notifica
+  if(direction === 'outgoing' && ev === 'UPDATE' && newRow.status === 'rejected' && oldRow.status === 'pending'){
+    fb(false, 'Rifiutata', (newRow.to_user_nome||'Il collega')+' ha rifiutato la chiamata');
+  }
+
+  // Incoming accettato (da me) o ricevuta accettata → ricarica per vedere la nuova chiamata
+  if(direction === 'incoming' && ev === 'UPDATE' && newRow.status === 'accepted'){
+    loadRows(PAGE);
+  }
+}
+
+function playGirataSound(){
+  try {
+    var ctx = new (window.AudioContext || window.webkitAudioContext)();
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    osc.connect(gain);gain.connect(ctx.destination);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(880, ctx.currentTime);
+    osc.frequency.setValueAtTime(660, ctx.currentTime + 0.18);
+    osc.frequency.setValueAtTime(880, ctx.currentTime + 0.36);
+    gain.gain.setValueAtTime(0.0001, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.25, ctx.currentTime + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.6);
+    osc.start();osc.stop(ctx.currentTime + 0.6);
+    setTimeout(function(){try{ctx.close();}catch(_){}}, 800);
+  } catch(_){}
+}
+
+function vibrateGirata(){
+  try{ if(navigator.vibrate) navigator.vibrate([180, 80, 180]); }catch(_){}
+}
+
+// Apre il modal selezione collega
+function openGiraModal(callId, callPreviewText){
+  pendingGiraCallId = callId;
+  var prev = document.getElementById('giraCallPreview');
+  if(prev) prev.textContent = callPreviewText || '';
+  var list = document.getElementById('giraColleghiList');
+  if(list) list.innerHTML = '<div style="padding:2rem;text-align:center"><div class="spin" style="margin:0 auto;border-color:rgba(46,125,94,.25);border-top-color:var(--pr);width:24px;height:24px"></div></div>';
+  apri('mgira');
+
+  // Carica colleghi (cache 5 min)
+  var doFetch = function(){
+    return getSupabaseClient().then(function(client){
+      return client.rpc('list_colleghi');
+    }).then(function(res){
+      if(res.error) throw res.error;
+      colleghiCache = { ts:Date.now(), data:res.data||[] };
+      return colleghiCache.data;
+    });
+  };
+
+  var promise;
+  if(colleghiCache && (Date.now() - colleghiCache.ts) < 5*60*1000){
+    promise = Promise.resolve(colleghiCache.data);
+  } else {
+    promise = doFetch();
+  }
+  promise.then(function(colleghi){
+    if(!colleghi || !colleghi.length){
+      list.innerHTML = '<div class="emp" style="padding:2rem"><h3>Nessun collega disponibile</h3><p>Non ci sono altri utenti nella whitelist.</p></div>';
+      return;
+    }
+    list.innerHTML = colleghi.map(function(c){
+      var initial = (c.full_name||'?').charAt(0).toUpperCase();
+      return '<div class="collega-row" data-uid="'+esc(c.user_id)+'" data-name="'+esc(c.full_name)+'">'
+        + '<div class="collega-avatar">'+esc(initial)+'</div>'
+        + '<div class="collega-name">'+esc(c.full_name)+'</div>'
+        + '<svg class="collega-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>'
+      + '</div>';
+    }).join('');
+  }).catch(function(e){
+    list.innerHTML = '<div class="emp" style="padding:2rem"><h3>Errore</h3><p>'+esc((e&&e.message)||'Impossibile caricare i colleghi.')+'</p></div>';
+  });
+}
+
+function closeGiraModal(){
+  chiudi('mgira');
+  pendingGiraCallId = null;
+}
+
+// Click su un collega → apri conferma
+function onCollegaClick(uid, name){
+  pendingGiraToUser = { uid:uid, name:name };
+  var msg = 'Sei sicuro di voler girare questa chiamata a <b>'+esc(name)+'</b>?<br><br>Riceverà una notifica e potrà accettare o rifiutare.';
+  document.getElementById('mgiraConfMsg').innerHTML = msg;
+  apri('mgiraConf');
+}
+
+function confirmGiraSend(){
+  if(!pendingGiraCallId || !pendingGiraToUser){ chiudi('mgiraConf'); return; }
+  var btn = document.getElementById('btnGiraConfOk');
+  var origHtml = btn.innerHTML;
+  btn.disabled = true; btn.innerHTML = '<div class="spin"></div> Invio…';
+  var callId = pendingGiraCallId;
+  var to = pendingGiraToUser;
+  getSupabaseClient().then(function(client){
+    return client.rpc('gira_chiamata', { p_chiamata_id: callId, p_to_user_id: to.uid });
+  }).then(function(res){
+    btn.disabled = false; btn.innerHTML = origHtml;
+    if(res.error){
+      var m = res.error.message || '';
+      if(m.indexOf('already_pending') !== -1){ fb(false,'Già girata','Questa chiamata ha già una girata in corso.'); }
+      else if(m.indexOf('chiamata_completata') !== -1){ fb(false,'Completata','Non puoi girare una chiamata già completata.'); }
+      else if(m.indexOf('not_owner') !== -1){ fb(false,'Errore','Non sei il proprietario di questa chiamata.'); }
+      else if(m.indexOf('cannot_send_to_self') !== -1){ fb(false,'Errore','Non puoi girare a te stesso.'); }
+      else if(m.indexOf('to_user_not_in_whitelist') !== -1){ fb(false,'Errore','Il destinatario non è in whitelist.'); }
+      else fb(false, 'Errore', m || 'Invio fallito.');
+      return;
+    }
+    chiudi('mgiraConf');
+    chiudi('mgira');
+    pendingGiraCallId = null; pendingGiraToUser = null;
+    fb(true, 'Inviata', 'Chiamata girata a '+to.name+'. In attesa di accettazione.');
+    fetchPendingGirate();
+    loadRows(PAGE);
+  }).catch(function(e){
+    btn.disabled = false; btn.innerHTML = origHtml;
+    fb(false,'Errore', (e&&e.message)||'Server non raggiungibile.');
+  });
+}
+
+function acceptGirata(girataId, btnEl){
+  if(btnEl){ btnEl.disabled = true; btnEl.innerHTML = '<div class="spin-dark"></div>'; }
+  getSupabaseClient().then(function(client){
+    return client.rpc('accetta_girata', { p_girata_id: girataId });
+  }).then(function(res){
+    if(res.error){
+      if(btnEl){ btnEl.disabled = false; }
+      var m = res.error.message || '';
+      if(m.indexOf('already_decided') !== -1){ fb(false,'Già decisa','Questa girata è già stata gestita.'); fetchPendingGirate(); }
+      else fb(false,'Errore', m || 'Accettazione fallita.');
+      return;
+    }
+    fb(true, 'Accettata', 'Chiamata aggiunta al tuo elenco.');
+    fetchPendingGirate();
+    loadRows(PAGE);
+  }).catch(function(e){
+    if(btnEl){ btnEl.disabled = false; }
+    fb(false,'Errore', (e&&e.message)||'Server non raggiungibile.');
+  });
+}
+
+function rejectGirata(girataId, btnEl){
+  if(btnEl){ btnEl.disabled = true; btnEl.innerHTML = '<div class="spin-dark"></div>'; }
+  getSupabaseClient().then(function(client){
+    return client.rpc('rifiuta_girata', { p_girata_id: girataId });
+  }).then(function(res){
+    if(res.error){
+      if(btnEl){ btnEl.disabled = false; }
+      var m = res.error.message || '';
+      if(m.indexOf('already_decided') !== -1){ fb(false,'Già decisa','Questa girata è già stata gestita.'); fetchPendingGirate(); }
+      else fb(false,'Errore', m || 'Rifiuto fallito.');
+      return;
+    }
+    fb(true, 'Rifiutata', 'Il mittente è stato avvisato.');
+    fetchPendingGirate();
+  }).catch(function(e){
+    if(btnEl){ btnEl.disabled = false; }
+    fb(false,'Errore', (e&&e.message)||'Server non raggiungibile.');
+  });
+}
+
+function cancelGirata(girataId, btnEl){
+  if(btnEl){ btnEl.disabled = true; btnEl.innerHTML = '<div class="spin-dark"></div>'; }
+  getSupabaseClient().then(function(client){
+    return client.rpc('annulla_girata', { p_girata_id: girataId });
+  }).then(function(res){
+    if(res.error){
+      if(btnEl){ btnEl.disabled = false; }
+      var m = res.error.message || '';
+      if(m.indexOf('too_late') !== -1){
+        fb(false, 'Troppo tardi', 'Il collega ha già accettato la girata. Non puoi più annullare.');
+        fetchPendingGirate(); loadRows(PAGE);
+      } else fb(false,'Errore', m || 'Annullamento fallito.');
+      return;
+    }
+    fb(true, 'Annullata', 'La richiesta di girata è stata annullata.');
+    fetchPendingGirate();
+    loadRows(PAGE);
+  }).catch(function(e){
+    if(btnEl){ btnEl.disabled = false; }
+    fb(false,'Errore', (e&&e.message)||'Server non raggiungibile.');
+  });
+}
+
+// SVG bottone Gira nelle azioni della riga
+function svgGira(){
+  return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>';
+}
+
+// Setup wiring del banner girate (delegation)
+function setupGirateBannerDelegation(){
+  var b = document.getElementById('girateBanner');
+  if(!b || b._delegated) return;
+  b._delegated = true;
+  b.addEventListener('click', function(e){
+    var btn = e.target.closest('.girate-btn');
+    if(!btn) return;
+    var action = btn.dataset.action;
+    var id = btn.dataset.id;
+    if(!id) return;
+    if(action === 'accept') acceptGirata(id, btn);
+    else if(action === 'reject') rejectGirata(id, btn);
+    else if(action === 'cancel') cancelGirata(id, btn);
+  });
+}
+
+// Setup wiring dei modali girate
+function setupGirateModalsDelegation(){
+  var lst = document.getElementById('giraColleghiList');
+  if(lst && !lst._delegated){
+    lst._delegated = true;
+    lst.addEventListener('click', function(e){
+      var row = e.target.closest('.collega-row');
+      if(!row) return;
+      onCollegaClick(row.dataset.uid, row.dataset.name);
+    });
+  }
+  var bClose = document.getElementById('btnGiraClose');
+  if(bClose) bClose.addEventListener('click', closeGiraModal);
+  var bCancel = document.getElementById('btnGiraCancel');
+  if(bCancel) bCancel.addEventListener('click', closeGiraModal);
+
+  var bcCancel = document.getElementById('btnGiraConfCancel');
+  if(bcCancel) bcCancel.addEventListener('click', function(){ chiudi('mgiraConf'); pendingGiraToUser = null; });
+  var bcOk = document.getElementById('btnGiraConfOk');
+  if(bcOk) bcOk.addEventListener('click', confirmGiraSend);
+}
+
 var addrModalQuery='';        // testo indirizzo corrente
 var addrModalSpan=null;       // span .addr-link cliccato
 var addrEditMode=false;
@@ -3393,8 +3899,28 @@ function relinkifyRow(tr){
     var cell=tr.querySelector(sel);
     if(!cell)return;
     if(document.activeElement===cell)return; // l'utente sta editando, non toccare
-    var raw=cell.innerText||'';
-    var newHtml=linkifyAddresses(linkifyPhones(esc(raw)));
+    // Preserva eventuale badge girata + <br> all'inizio della cella (solo descrizione)
+    var preservedPrefix='';
+    var firstBadge=cell.querySelector(':scope > .girata-badge');
+    if(firstBadge){
+      preservedPrefix=firstBadge.outerHTML;
+      // Eventuale <br> immediatamente successivo
+      var next=firstBadge.nextSibling;
+      if(next && next.nodeType===1 && next.tagName==='BR'){
+        preservedPrefix+='<br>';
+      }
+    }
+    // Per ricavare il raw senza il badge, clono e tolgo il badge
+    var clone=cell.cloneNode(true);
+    var b2=clone.querySelector(':scope > .girata-badge');
+    if(b2){
+      var nx=b2.nextSibling;
+      if(nx && nx.nodeType===1 && nx.tagName==='BR') nx.parentNode.removeChild(nx);
+      b2.parentNode.removeChild(b2);
+    }
+    var raw=clone.innerText||'';
+    var newBody=linkifyAddresses(linkifyPhones(esc(raw)));
+    var newHtml=preservedPrefix+newBody;
     if(newHtml!==cell.innerHTML)cell.innerHTML=newHtml;
   });
 }
