@@ -3216,13 +3216,19 @@ function svgExport(){return '<svg width="14" height="14" viewBox="0 0 24 24" fil
 // ───────────────────────────────────────────────────────────
 // CLICK-TO-CALL: trasforma numeri di telefono in link
 // Pattern italiano stretto:
-//   - Mobile: 3xx-xxx-xxxx (10 cifre, opz +39 davanti)
-//   - Fisso : 0xx-xxxxxxxx (8-11 cifre, opz +39)
-// (?<!\d) e (?!\d) impediscono di "fondere" CAP + telefono o due numeri attigui
+//   - Mobile: 3xx + 7 cifre (10 totali), un solo separatore opzionale tra i due gruppi
+//   - Fisso : 0xx + 6-8 cifre, un solo separatore opzionale
+//   - Prefisso +39 opzionale, separato solo da spazio/tab/punto/trattino
+// Newline (\n) NON è separatore: spezza il match → un numero a cavallo di righe
+// non viene riconosciuto. (?<!\d) e (?!\d) impediscono di fondere CAP+telefono.
+// Separatore interno: SOLO uno tra spazio orizzontale, tab, punto, trattino, slash
+// (non virgole, non newline, non più di uno tra i due gruppi).
 // ───────────────────────────────────────────────────────────
 function linkifyPhones(html){
-  // Mobile (3 + 9 cifre) OPPURE Fisso (0 + prefisso 1-3 cifre + corpo 6-8 cifre)
-  var re = /(?<!\d)(?:\+?39[\s.\-]?)?(?:3\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3,4}|0\d{1,3}[\s.\-]?\d{6,8})(?!\d)/g;
+  // SEP = un solo separatore "in linea" (no \n) o niente
+  // Mobile: 3 + 2 cifre + (SEP)? + 7 cifre
+  // Fisso : 0 + 1-3 cifre + (SEP)? + 6-8 cifre
+  var re = /(?<!\d)(?:\+?39[ \t.\-]?)?(?:3\d{2}[ \t.\-\/]?\d{7}|0\d{1,3}[ \t.\-\/]?\d{6,8})(?!\d)/g;
   return html.replace(re, function(match){
     var digits = match.replace(/\D/g,'');
     // Validazione semantica:
