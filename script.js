@@ -820,6 +820,29 @@ function setupQuickLinks(){
 document.addEventListener('DOMContentLoaded',function(){
 
   initEls();
+  // Collapse "Nuova Chiamata" su mobile (solo su mobile è interactive, su desktop il chevron è hidden via CSS)
+  (function setupNewCallCollapse(){
+    var card=document.getElementById('newCallCard');
+    var header=document.getElementById('newCallHeader');
+    if(!card||!header)return;
+    var KEY='newCallCollapsed';
+    // Restore stato salvato (solo se mobile)
+    if(window.matchMedia&&window.matchMedia('(max-width:640px)').matches){
+      if(localStorage.getItem(KEY)==='1'){
+        card.classList.add('collapsed');
+        header.setAttribute('aria-expanded','false');
+      }
+    }
+    header.addEventListener('click',function(){
+      // Su desktop il chevron è hidden via CSS, ma il click è ancora attivo;
+      // limito il toggle al mobile per coerenza UX
+      if(!window.matchMedia('(max-width:640px)').matches)return;
+      var nowCollapsed=card.classList.toggle('collapsed');
+      header.setAttribute('aria-expanded',nowCollapsed?'false':'true');
+      try{localStorage.setItem(KEY,nowCollapsed?'1':'0');}catch(_){}
+    });
+  })();
+
   // Mostra il SHA del deploy nel sottotitolo (per debug visivo)
   var hsub=document.querySelector('.hsub');
   if(hsub)hsub.innerHTML='Registro Chiamate. <span class="hsub-ver" title="Build '+esc(BUILD_VERSION)+'">v'+esc(BUILD_SHA)+'</span>';
