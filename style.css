@@ -539,6 +539,35 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
 }
 [data-theme="dark"] .girate-pending-tag{color:#fbbf24;background:rgba(251,191,36,.1);border-color:rgba(251,191,36,.3)}
 
+/* Card "decisa" (rejected/accepted/cancelled) — auto-dismiss in 7s */
+.girate-card.rejected{
+  border-color:#c0392b;
+  background:linear-gradient(180deg,rgba(192,57,43,.10),rgba(192,57,43,.03));
+  animation:girateDecidedIn .25s ease-out, girateDecidedFade .5s ease-in 6.5s forwards;
+}
+.girate-card.accepted{
+  border-color:var(--pr);
+  background:linear-gradient(180deg,rgba(46,125,94,.10),rgba(46,125,94,.03));
+  animation:girateDecidedIn .25s ease-out, girateDecidedFade .5s ease-in 6.5s forwards;
+}
+.girate-card.cancelled{
+  border-color:var(--txm);
+  background:linear-gradient(180deg,rgba(120,120,120,.10),rgba(120,120,120,.03));
+  animation:girateDecidedIn .25s ease-out, girateDecidedFade .5s ease-in 6.5s forwards;
+}
+.girate-decided-title{
+  display:flex;align-items:center;gap:.4rem;
+  font-weight:700;font-size:.85rem;
+  text-transform:uppercase;letter-spacing:.04em;
+  margin-bottom:.15rem;
+}
+.girate-card.rejected .girate-decided-title{color:#c0392b}
+.girate-card.accepted .girate-decided-title{color:var(--pr)}
+.girate-card.cancelled .girate-decided-title{color:var(--txm)}
+[data-theme="dark"] .girate-card.rejected .girate-decided-title{color:#ef6361}
+@keyframes girateDecidedIn{from{opacity:0;transform:scale(.96)}to{opacity:1;transform:scale(1)}}
+@keyframes girateDecidedFade{to{opacity:0;transform:translateY(-4px)}}
+
 /* Bottone Gira nelle azioni della riga */
 .iho-gira{
   width:32px;height:32px;border-radius:var(--r1);
