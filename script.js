@@ -3215,15 +3215,22 @@ function svgExport(){return '<svg width="14" height="14" viewBox="0 0 24 24" fil
 
 // ───────────────────────────────────────────────────────────
 // CLICK-TO-CALL: trasforma numeri di telefono in link
-// Pattern strutturato (mobile 3xx / fisso 0xx, opz +39),
-// non greedy: matcha UN numero alla volta senza fagocitare i seguenti
+// Pattern italiano stretto:
+//   - Mobile: 3xx-xxx-xxxx (10 cifre, opz +39 davanti)
+//   - Fisso : 0xx-xxxxxxxx (8-11 cifre, opz +39)
+// (?<!\d) e (?!\d) impediscono di "fondere" CAP + telefono o due numeri attigui
 // ───────────────────────────────────────────────────────────
 function linkifyPhones(html){
-  var re=/(?:\+?39\s?)?[03]\d{1,3}[\s.\-]?\d{2,4}[\s.\-]?\d{3,4}/g;
-  return html.replace(re,function(match){
-    var digits=match.replace(/\D/g,'');
-    if(digits.length<9||digits.length>12)return match;
-    if(!/^(39)?[03]/.test(digits))return match;
+  // Mobile (3 + 9 cifre) OPPURE Fisso (0 + prefisso 1-3 cifre + corpo 6-8 cifre)
+  var re = /(?<!\d)(?:\+?39[\s.\-]?)?(?:3\d{2}[\s.\-]?\d{3}[\s.\-]?\d{3,4}|0\d{1,3}[\s.\-]?\d{6,8})(?!\d)/g;
+  return html.replace(re, function(match){
+    var digits = match.replace(/\D/g,'');
+    // Validazione semantica:
+    //   Mobile: 10 cifre (3xxxxxxxxx) o 12 con prefisso 39
+    //   Fisso : 8-11 cifre (0xx...) o 10-13 con prefisso 39
+    var isMobile = /^(?:39)?3\d{9}$/.test(digits);
+    var isFisso  = /^(?:39)?0\d{7,10}$/.test(digits);
+    if(!isMobile && !isFisso) return match;
     return '<span class="ph-link" contenteditable="false" data-phone="'+digits+'" title="Tocca per chiamare">'+match+'</span>';
   });
 }
