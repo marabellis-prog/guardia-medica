@@ -59,7 +59,7 @@ input,textarea,select{font:inherit;color:inherit}
 .hsub-ver{display:inline-block;margin-left:.4rem;padding:1px 6px;border-radius:99px;background:var(--surface2);color:var(--txf);font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.7rem;font-weight:600;letter-spacing:.02em;vertical-align:1px;cursor:help}
 .ibtn{width:36px;height:36px;border-radius:var(--r2);display:flex;align-items:center;justify-content:center;color:var(--txm);transition:background var(--tr),color var(--tr)}
 .ibtn:hover{background:var(--surface2);color:var(--tx)}
-.main{max-width:1200px;margin:0 auto;padding:1.5rem 1rem 4rem}
+.main{max-width:1200px;margin:0 auto;padding:1.5rem 1rem 4rem;box-sizing:border-box}
 .fc{background:var(--surface);border:1px solid var(--bord);border-radius:var(--r3);padding:1.5rem;box-shadow:var(--sh1);margin-bottom:2rem}
 .fch{display:flex;align-items:center;gap:.75rem;margin-bottom:1.25rem}
 .fcht{font-family:var(--fd);font-size:clamp(1.125rem,1rem + .75vw,1.5rem);flex:1}
@@ -169,6 +169,16 @@ tr.has-open-dd{position:relative;z-index:300}
 @keyframes shim{0%{background-position:-200% 0}100%{background-position:200% 0}}
 .sk{background:linear-gradient(90deg,var(--surface2) 25%,var(--surfoff) 50%,var(--surface2) 75%);background-size:200% 100%;animation:shim 1.5s ease-in-out infinite;border-radius:var(--r1)}
 @media(max-width:768px){.tid{display:none}.hdr{padding:.75rem 1rem}.main{padding:1rem .75rem 3rem}}
+@media(max-width:640px){
+  /* Layout mobile a larghezza piena: bordi minimi laterali, card più larghe */
+  .main{padding:.85rem .5rem 2.5rem}
+  .fc{padding:1rem .85rem;border-radius:12px}
+  .srch-panel{padding:1rem .85rem;border-radius:12px}
+  .twrap{margin:0 -.15rem} /* tabella usa quasi tutta la larghezza */
+  /* Paginazione: pulsanti più compatti e wrappabili */
+  .pgn{flex-wrap:wrap;gap:.3rem}
+  .bp{min-width:34px;height:34px;padding:0 .5rem;font-size:.85rem}
+}
 .srch-bar{display:flex;align-items:center;gap:.5rem}
 .srch-panel{background:var(--surface);border:1px solid var(--bord);border-radius:var(--r3);padding:1.25rem 1.5rem;margin-bottom:1rem;box-shadow:var(--sh1);display:none;animation:fadeSlide .18s ease}
 .srch-panel.open{display:block}
