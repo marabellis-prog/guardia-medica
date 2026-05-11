@@ -285,7 +285,8 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
 .auth-google-btn:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.12)}
 .auth-google-btn:active{transform:translateY(0)}
 .auth-google-btn:disabled{opacity:.6;cursor:wait}
-.auth-error{margin-top:1rem;padding:.65rem .85rem;background:var(--erbg);color:var(--er);border-radius:8px;font-size:.85rem;font-weight:500}
+.auth-error{margin-top:1rem;padding:.85rem 1rem;background:var(--erbg);color:var(--er);border-radius:8px;font-size:.85rem;font-weight:500;text-align:left;line-height:1.5}
+.auth-error b{font-weight:700;word-break:break-all}
 .auth-other-link{display:inline-block;margin-top:.85rem;color:var(--txm);font-size:.82rem;text-decoration:underline;text-decoration-color:rgba(255,255,255,.25);text-underline-offset:3px;cursor:pointer;transition:color var(--tr),text-decoration-color var(--tr)}
 .auth-other-link:hover{color:var(--pr);text-decoration-color:var(--pr)}
 .auth-foot{margin-top:1.5rem;font-size:.75rem;color:var(--txf);line-height:1.45}
