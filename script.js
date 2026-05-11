@@ -3635,23 +3635,14 @@ function openGiraModal(callId, callPreviewText){
   if(list) list.innerHTML = '<div style="padding:2rem;text-align:center"><div class="spin" style="margin:0 auto;border-color:rgba(46,125,94,.25);border-top-color:var(--pr);width:24px;height:24px"></div></div>';
   apri('mgira');
 
-  // Carica colleghi (cache 5 min)
-  var doFetch = function(){
-    return getSupabaseClient().then(function(client){
-      return client.rpc('list_colleghi');
-    }).then(function(res){
-      if(res.error) throw res.error;
-      colleghiCache = { ts:Date.now(), data:res.data||[] };
-      return colleghiCache.data;
-    });
-  };
-
-  var promise;
-  if(colleghiCache && (Date.now() - colleghiCache.ts) < 5*60*1000){
-    promise = Promise.resolve(colleghiCache.data);
-  } else {
-    promise = doFetch();
-  }
+  // Fresh fetch ad ogni apertura: la lista colleghi può cambiare (nuovi utenti,
+  // primo accesso di un utente già in whitelist) e una cache lunga creerebbe confusione.
+  var promise = getSupabaseClient().then(function(client){
+    return client.rpc('list_colleghi');
+  }).then(function(res){
+    if(res.error) throw res.error;
+    return res.data || [];
+  });
   promise.then(function(colleghi){
     if(!colleghi || !colleghi.length){
       list.innerHTML = '<div class="emp" style="padding:2rem"><h3>Nessun collega disponibile</h3><p>Non ci sono altri utenti nella whitelist.</p></div>';
@@ -3659,10 +3650,21 @@ function openGiraModal(callId, callPreviewText){
     }
     list.innerHTML = colleghi.map(function(c){
       var initial = (c.full_name||'?').charAt(0).toUpperCase();
-      return '<div class="collega-row" data-uid="'+esc(c.user_id)+'" data-name="'+esc(c.full_name)+'">'
+      var hasAcc = c.has_account !== false; // se manca, default true (backward compat)
+      var rowClass = 'collega-row' + (hasAcc ? '' : ' disabled');
+      var title = hasAcc
+        ? ''
+        : 'L\'utente non ha ancora effettuato il primo accesso — non è possibile girargli chiamate finché non si autentica almeno una volta.';
+      var subline = hasAcc
+        ? ''
+        : '<div class="collega-sub">Non ancora attivo</div>';
+      var trailing = hasAcc
+        ? '<svg class="collega-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>'
+        : '<svg class="collega-lock" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>';
+      return '<div class="'+rowClass+'" data-uid="'+esc(c.user_id||'')+'" data-name="'+esc(c.full_name)+'" data-has-account="'+(hasAcc?'1':'0')+'" title="'+esc(title)+'">'
         + '<div class="collega-avatar">'+esc(initial)+'</div>'
-        + '<div class="collega-name">'+esc(c.full_name)+'</div>'
-        + '<svg class="collega-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"/></svg>'
+        + '<div class="collega-name-wrap"><div class="collega-name">'+esc(c.full_name)+'</div>'+subline+'</div>'
+        + trailing
       + '</div>';
     }).join('');
   }).catch(function(e){
@@ -3814,6 +3816,10 @@ function setupGirateModalsDelegation(){
     lst.addEventListener('click', function(e){
       var row = e.target.closest('.collega-row');
       if(!row) return;
+      if(row.dataset.hasAccount === '0' || row.classList.contains('disabled')){
+        fb(false, 'Utente non attivo', (row.dataset.name||'Il collega')+' non ha ancora fatto il primo accesso. Non puoi girargli chiamate finché non si autentica almeno una volta.');
+        return;
+      }
       onCollegaClick(row.dataset.uid, row.dataset.name);
     });
   }
