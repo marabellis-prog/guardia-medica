@@ -124,16 +124,32 @@ function hideLoader(){
 // - Se autenticato e in whitelist: carica app + memorizza role
 // ───────────────────────────────────────────────────────────
 var currentUser = null; // { id, email, full_name, role }
+// Flag per impedire il reload automatico in onAuthStateChange dopo SIGNED_OUT
+// causato da un check whitelist fallito (così l'utente vede il messaggio di errore)
+var authRejectInProgress = false;
 
-function authShowOverlay(errorMsg){
+function authShowOverlay(errorMsg, allowHtml){
   var ov = document.getElementById('authOverlay');
   var loader = document.getElementById('page-loader');
   var er = document.getElementById('authError');
   if(loader) loader.style.display = 'none';
   if(ov) ov.style.display = 'flex';
   if(er){
-    if(errorMsg){er.textContent = errorMsg; er.style.display = 'block';}
-    else{er.style.display = 'none'; er.textContent = '';}
+    if(errorMsg){
+      if(allowHtml) er.innerHTML = errorMsg;
+      else er.textContent = errorMsg;
+      er.style.display = 'block';
+    } else {
+      er.style.display = 'none';
+      er.textContent = '';
+    }
+  }
+  // Riabilita il pulsante "Accedi con Google" (se era in stato "Apertura Google…")
+  var btn = document.getElementById('btnAuthGoogle');
+  if(btn){
+    btn.disabled = false;
+    var span = btn.querySelector('span');
+    if(span) span.textContent = 'Accedi con Google';
   }
   // Nasconde l'app
   document.body.classList.add('auth-pending');
@@ -174,6 +190,9 @@ async function setupAuth(){
     if(event === 'SIGNED_OUT'){
       currentUser = null;
       currentJwt = null;
+      // Se il signOut è stato causato da un check whitelist fallito,
+      // NON ricaricare: l'utente deve poter leggere il messaggio di errore.
+      if(authRejectInProgress) return;
       authShowOverlay();
       setTimeout(function(){ window.location.reload(); }, 200);
     } else if(event === 'TOKEN_REFRESHED' && session){
@@ -195,8 +214,10 @@ async function setupAuth(){
 
   var email = session.user && session.user.email;
   if(!email){
-    await client.auth.signOut();
-    authShowOverlay('Login senza email valida. Riprova.');
+    authRejectInProgress = true;
+    try { await client.auth.signOut(); } catch(_){}
+    setTimeout(function(){ authRejectInProgress = false; }, 1500);
+    authShowOverlay('Login senza email valida. Riprova.', true);
     return;
   }
 
@@ -204,12 +225,19 @@ async function setupAuth(){
   var entry;
   try { entry = await checkWhitelist(client, email); }
   catch(e){
-    authShowOverlay('Errore verifica autorizzazioni: '+(e.message||e));
+    authShowOverlay('Errore verifica autorizzazioni: '+(e.message||e), false);
     return;
   }
   if(!entry){
-    await client.auth.signOut();
-    authShowOverlay('L\'email '+email+' non è autorizzata. Contatta l\'amministratore.');
+    authRejectInProgress = true;
+    try { await client.auth.signOut(); } catch(_){}
+    setTimeout(function(){ authRejectInProgress = false; }, 1500);
+    authShowOverlay(
+      'L\'account Google <b>'+esc(email)+'</b> non è in whitelist.<br><br>'
+      + 'Se ti aspettavi di poter entrare, controlla con l\'amministratore che '
+      + 'questa sia l\'email registrata. Potresti anche aver effettuato login con un account Google diverso da quello previsto: clicca "Usa un altro account Google" per riprovare.',
+      true
+    );
     return;
   }
 
