@@ -1138,6 +1138,35 @@ document.addEventListener('DOMContentLoaded',function(){
     window.location.href='tel:%2331%23'+num;
   });
 
+  var btnPhoneCopy=document.getElementById('btnPhoneCopy');
+  if(btnPhoneCopy)btnPhoneCopy.addEventListener('click',function(){
+    var num=phoneModalNumber;
+    if(phoneEditMode){var d=commitPhoneEdit();if(d===null)return;num=d;}
+    // Copia SOLO cifre (no spazi, +, trattini): phoneModalNumber è già digits
+    var digitsOnly=String(num||'').replace(/\D/g,'');
+    if(!digitsOnly){return;}
+    copyToClipboard(digitsOnly).then(function(ok){
+      var lbl=document.getElementById('phoneCopyLabel');
+      var ico=document.getElementById('phoneCopyIco');
+      if(ok && lbl && ico){
+        var origLbl=lbl.textContent;
+        var origIcoHtml=ico.innerHTML;
+        lbl.textContent='Copiato!';
+        ico.innerHTML='<polyline points="20 6 9 17 4 12"/>';
+        btnPhoneCopy.style.color='var(--ok)';
+        btnPhoneCopy.style.borderColor='var(--ok)';
+        setTimeout(function(){
+          lbl.textContent=origLbl;
+          ico.innerHTML=origIcoHtml;
+          btnPhoneCopy.style.color='';
+          btnPhoneCopy.style.borderColor='';
+        },1500);
+      } else if(!ok){
+        fb(false,'Copia fallita','Il browser ha bloccato la copia automatica.');
+      }
+    });
+  });
+
   // Modal indirizzo
   var btnAddrCancel=document.getElementById('btnAddrCancel');
   var btnAddrEdit=document.getElementById('btnAddrEdit');
@@ -3240,6 +3269,27 @@ function runExport(){
 }
 
 function svgExport(){return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>';}
+
+// Copia testo negli appunti: usa Clipboard API moderna, fallback su execCommand per browser legacy/contesti non-secure
+function copyToClipboard(text){
+  if(navigator.clipboard && window.isSecureContext){
+    return navigator.clipboard.writeText(String(text)).then(function(){return true;}).catch(function(){return fallbackCopy(text);});
+  }
+  return Promise.resolve(fallbackCopy(text));
+}
+function fallbackCopy(text){
+  try{
+    var ta=document.createElement('textarea');
+    ta.value=String(text);
+    ta.style.cssText='position:fixed;top:-1000px;left:-1000px;opacity:0';
+    document.body.appendChild(ta);
+    ta.select();
+    var ok=false;
+    try{ok=document.execCommand('copy');}catch(_){ok=false;}
+    document.body.removeChild(ta);
+    return ok;
+  }catch(_){return false;}
+}
 
 // ───────────────────────────────────────────────────────────
 // CLICK-TO-CALL: trasforma numeri di telefono in link
