@@ -744,3 +744,84 @@ tbody tr.pending-sync{box-shadow:inset 4px 0 0 0 var(--wa,#d4a017)}
   .pgn{margin-top:12px}
   .bp{min-width:38px;height:38px;font-size:.9rem}
 }
+
+/* ═══════════════════════════════════════
+   SAFETY NET — Prevenzione overflow orizzontale
+   - Blocca scroll laterale globale
+   - Permette ai flex/grid children di shrinkare correttamente
+   - Cap su modali e dropdown su mobile
+═══════════════════════════════════════ */
+/* Root: niente scroll laterale (clip è il moderno equivalente di hidden, preserva sticky) */
+html,body{overflow-x:clip;max-width:100vw}
+@supports not (overflow:clip){html,body{overflow-x:hidden}}
+
+/* Default min-width:0 su elementi flex/grid children dentro contenitori critici
+   per permettere shrink anche con contenuti "intrinseci larghi" (es. URL lunghe). */
+.mbox *,.fc *,.twrap *,.girate-banner *{min-width:0}
+
+/* Su mobile: tutti i modali cap su 94vw e padding interno ridotto.
+   !important batte gli inline-style "width: min(94vw, NNNpx)" senza forzature manuali */
+@media(max-width:640px){
+  .mbox{
+    max-width:min(94vw,640px)!important;
+    width:min(94vw,640px)!important;
+    padding:1.1rem!important;
+  }
+  /* Padding più aggressivo solo per i modali con tanto contenuto verticale (gestione postazioni, admin, cestino) */
+  #mpost .mbox,#madmin .mbox,#mtrash .mbox,#mexport .mbox{padding:1rem .85rem!important}
+
+  /* Modal Gestione postazioni: collassa header grid e righe verso layout stack verticale */
+  #mpost div[style*="grid-template-columns:minmax(180px,1fr)"]{display:none!important}
+  #mpost .post-row-main{flex-direction:column!important;align-items:stretch!important;gap:8px!important}
+  #mpost .post-row-left,#mpost .post-row-mid{flex:1 1 100%!important;min-width:0!important}
+  #mpost .post-row-right{margin-left:0!important;justify-content:flex-end!important;gap:6px}
+
+  /* Modal Export: griglia date a colonna singola (già gestita >480 ma rinforzo) */
+  .export-grid{grid-template-columns:1fr!important}
+
+  /* Banner girate: rimuovi min-width:200px che causava overflow */
+  .girate-card-info{min-width:0!important;flex:1 1 100%!important}
+  .girate-card{flex-wrap:wrap}
+
+  /* User menu dropdown: cap su viewport, ancoraggio sicuro a destra */
+  .user-menu-dropdown{
+    min-width:0;
+    width:min(280px,calc(100vw - 24px));
+    right:0;left:auto;
+  }
+
+  /* Post dropdown (selezione postazione su riga): clamp e fallback overflow visible */
+  .post-dropdown{
+    min-width:0;
+    max-width:min(220px,calc(100vw - 32px));
+    word-break:break-word;
+  }
+
+  /* Link telefono: permetti wrap su mobile (per numeri lunghi tipo +39 333 1234567) */
+  .ph-link{white-space:normal;word-break:break-word}
+
+  /* Link indirizzo: già wrap-friendly ma rinforzo */
+  .addr-link{word-break:break-word}
+
+  /* Cestino: descrizioni e badge wrap */
+  .trash-row-head{flex-wrap:wrap}
+  .trash-ts,.trash-days{min-width:0}
+
+  /* Twrap senza margin negativi che eccedono di 2-3px */
+  .twrap{margin:0!important}
+
+  /* Form nuova chiamata: select postazione non deve forzare overflow */
+  .selp{min-width:0;max-width:100%}
+  .dtb{min-width:0;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+  /* Auth card: non superare lo schermo */
+  .auth-card{max-width:min(380px,calc(100vw - 24px))}
+}
+
+/* Catch-all per viewport molto stretti (<380px) */
+@media(max-width:380px){
+  .mbox{padding:.9rem .75rem!important}
+  .mac{gap:.4rem}
+  .mac button{padding:0 .85rem;height:36px;font-size:.85rem}
+  .hquick{gap:.35rem}
+}
