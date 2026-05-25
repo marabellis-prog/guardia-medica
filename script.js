@@ -1783,7 +1783,7 @@ function drawRows(recs,highlightQuery){
     if(r.girata_a_nome){
       // Sono il mittente, già accettata dal collega
       girataBadge = '<span class="girata-badge" contenteditable="false" title="Girata accettata">'
-        +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/></svg>'
+        +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>'
         +'Girata a '+esc(r.girata_a_nome)+(r.girata_a_at?' · '+esc(formatTSFromISO(r.girata_a_at)):'')
       +'</span>';
     } else if(r.girata_da_nome){
@@ -3591,7 +3591,7 @@ function renderGirateBanner(){
   if(out.length){
     html += '<div class="girate-banner-section">';
     html += '<div class="girate-banner-title">'
-      + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/></svg>'
+      + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>'
       + (out.length===1?'1 girata in attesa di accettazione':out.length+' girate in attesa di accettazione')
       + '</div>';
     out.forEach(function(g){
@@ -3865,7 +3865,8 @@ function cancelGirata(girataId, btnEl){
 
 // SVG bottone Gira nelle azioni della riga
 function svgGira(){
-  return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>';
+  // Aeroplanino di carta (Feather Icons "send")
+  return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
 }
 
 // Setup wiring del banner girate (delegation)
