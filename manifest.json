@@ -1,0 +1,38 @@
+{
+  "name": "Guardia Medica",
+  "short_name": "Guardia",
+  "description": "Registro chiamate guardia medica con coda offline e cestino",
+  "id": "/guardia-medica/",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#171614",
+  "theme_color": "#2e7d5e",
+  "lang": "it",
+  "categories": ["medical", "productivity", "utilities"],
+  "icons": [
+    {
+      "src": "favicon.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Nuova chiamata",
+      "short_name": "Nuova",
+      "description": "Registra una nuova chiamata",
+      "url": "./?action=new",
+      "icons": [{ "src": "favicon.png", "sizes": "any" }]
+    },
+    {
+      "name": "Cestino",
+      "short_name": "Cestino",
+      "description": "Apri il cestino chiamate",
+      "url": "./?action=trash",
+      "icons": [{ "src": "favicon.png", "sizes": "any" }]
+    }
+  ]
+}
