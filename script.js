@@ -55,6 +55,28 @@ function authHeaders(){
   };
 }
 
+// Rinnovo proattivo del JWT. getSession() rinnova automaticamente il token se
+// scaduto/prossimo alla scadenza (se c'è un refresh token valido). Serve dopo
+// lunghe inattività: quando il tab è in background o il device in sospensione,
+// i timer di auto-refresh del browser vengono congelati e al risveglio il JWT
+// può essere già scaduto → le query tornerebbero 401 con "JWT expired".
+var _tokenRefreshInFlight = null;
+function ensureFreshToken(){
+  if(_tokenRefreshInFlight) return _tokenRefreshInFlight;
+  _tokenRefreshInFlight = getSupabaseClient().then(function(client){
+    return client.auth.getSession();
+  }).then(function(res){
+    var s = res && res.data && res.data.session;
+    if(s && s.access_token){ currentJwt = s.access_token; }
+    _tokenRefreshInFlight = null;
+    return !!(s && s.access_token);
+  }).catch(function(){
+    _tokenRefreshInFlight = null;
+    return false;
+  });
+  return _tokenRefreshInFlight;
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // CONVERSIONE TIMESTAMP
@@ -264,6 +286,8 @@ async function setupAuth(){
   refreshTrashBadge();
   // GIRA CHIAMATA: carica pending + attiva realtime sul canale girate
   setupGirate();
+  // Recupera eventuale bozza di nuova chiamata non ancora salvata
+  restoreDraft();
 }
 
 async function authSignInWithGoogle(forceAccountChoice){
@@ -755,16 +779,21 @@ function setupAutoRefresh(){
   // Prova Realtime; se fallisce parte polling
   setupRealtime();
 
-  // Tab focus → refresh immediato (caso classico multi-device)
+  // Tab focus → rinnova token, drena la coda, poi refresh immediato.
+  // Il rinnovo token PRIMA del refresh risolve il bug "Errore server" dopo
+  // lunga inattività (JWT scaduto mentre il device era sospeso).
   document.addEventListener('visibilitychange',function(){
     if(document.hidden)return;
     var ex=document.getElementById('refreshBanner');
     if(ex)ex.remove();
-    if(isUserBusy()){
-      checkForRemoteChanges();
-      return;
-    }
-    refreshAndUpdateMark();
+    ensureFreshToken().then(function(){
+      syncProcess(); // invia eventuali chiamate/modifiche accumulate offline
+      if(isUserBusy()){
+        checkForRemoteChanges();
+        return;
+      }
+      refreshAndUpdateMark();
+    });
   });
 }
 
@@ -1226,7 +1255,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
   ['txd','txn'].forEach(function(id){
     var el=document.getElementById(id);
-    if(el)attachPlainTextArea(el);
+    if(el){ attachPlainTextArea(el); el.addEventListener('input',saveDraftDebounced); }
   });
 
   // Unsaved 1
@@ -1667,31 +1696,48 @@ function salva(){
   var btn=document.getElementById('btnSave');
   btn.disabled=true;btn.innerHTML='<div class="spin"></div> Salvataggio…';
 
+  var tsISO=italianToISO(fmtD+' '+fmtT)||new Date().toISOString();
+  var clientUuid=newClientUuid();
+  var body={
+    timestamp_chiamata:tsISO, postazione:p||'', descrizione:d, note:n||'',
+    completato:false, user_id:currentUser?currentUser.id:null, client_uuid:clientUuid
+  };
+
+  // ── LOCAL-FIRST ──────────────────────────────────────────────────
+  // 1. Scrivi SUBITO in coda locale (localStorage, durabile). Da questo
+  //    momento la chiamata NON si perde più: sopravvive a chiusura/ricarica.
+  var persisted=syncEnqueueInsert(clientUuid, body);
+  if(!persisted){
+    // localStorage non disponibile (modalità privata/incognito o memoria piena):
+    // NON pulire il form, così i dati restano visibili e recuperabili a mano.
+    btn.disabled=false;btn.innerHTML=svgSave()+' Salva';
+    fb(false,'Salvataggio locale non riuscito','La memoria del browser non è disponibile (forse navigazione privata o piena). I dati NON sono stati salvati: non chiudere la pagina, controlla di non essere in incognito e riprova. In alternativa copia il testo altrove.');
+    return;
+  }
+
+  // 2. Pulisci il form + la bozza (i dati sono ormai al sicuro in coda).
+  document.getElementById('txd').value='';
+  document.getElementById('txn').value='';
+  var dtEl=document.getElementById('dtxt');
+  dtEl.textContent='—';setFieldError(dtEl,false);
+  if(p){buildSelPost(p);localStorage.setItem('lastPostazione',p);}
+  clearDraft();
+  currentFilters=null;resetSearchUI();
+
+  var finalize=function(sent){
+    btn.disabled=false;btn.innerHTML=svgSave()+' Salva';
+    if(sent){
+      fb(true,'Salvata','Chiamata salvata sul server.');
+    } else {
+      fb(true,'Salvata in locale','Connessione assente: la chiamata è al sicuro sul dispositivo e verrà inviata automaticamente appena torna la linea. Puoi anche chiudere l\'app: NON perderai i dati.');
+    }
+    loadRows(1);
+  };
+
+  // 3. Salva prima eventuali modifiche in sospeso su altre righe, poi tenta l'invio.
   saveAllDirtySilent(function(){
-    var tsISO=italianToISO(fmtD+' '+fmtT)||new Date().toISOString();
-    markOwnWrite();
-    sbFetch('chiamate',{
-      method:'POST',
-      body:{timestamp_chiamata:tsISO,postazione:p||'',descrizione:d,note:n||'',completato:false,user_id:currentUser?currentUser.id:null},
-      prefer:'return=minimal'
-    }).then(function(res){
-      btn.disabled=false;btn.innerHTML=svgSave()+' Salva';
-      if(res.ok){
-        document.getElementById('txd').value='';
-        document.getElementById('txn').value='';
-        var dtEl=document.getElementById('dtxt');
-        dtEl.textContent='—';setFieldError(dtEl,false);
-        if(p){buildSelPost(p);localStorage.setItem('lastPostazione',p);}
-        currentFilters=null;resetSearchUI();
-        fb(true,'Salvata','Chiamata salvata con successo.');
-        loadRows(1);
-      } else {
-        fb(false,'Errore','Errore nel salvataggio.');
-      }
-    }).catch(function(){
-      btn.disabled=false;btn.innerHTML=svgSave()+' Salva';
-      fb(false,'Errore','Server non raggiungibile.');
-    });
+    if(typeof navigator!=='undefined' && navigator.onLine===false){ finalize(false); return; }
+    syncOneInsert(clientUuid, body).then(function(ok){ finalize(ok); });
   });
 }
 
@@ -1714,46 +1760,111 @@ function loadRows(pg){
   }
   params+='&limit='+CURRENT_PAGE_SIZE+'&offset='+offset;
 
-  var loadHeaders = authHeaders(); loadHeaders['Prefer'] = 'count=exact';
-  fetch(SUPABASE_URL+'/rest/v1/'+params,{
-    method:'GET',
-    headers:loadHeaders
+  var doFetch=function(){
+    var loadHeaders = authHeaders(); loadHeaders['Prefer'] = 'count=exact';
+    return fetch(SUPABASE_URL+'/rest/v1/'+params,{method:'GET',headers:loadHeaders});
+  };
+
+  doFetch().then(function(res){
+    // JWT scaduto (tipico dopo lunga inattività) → rinnova e riprova UNA volta
+    if(res.status===401){
+      return ensureFreshToken().then(function(ok){
+        if(!ok) throw {kind:'auth'};
+        return doFetch();
+      });
+    }
+    return res;
   }).then(function(res){
     var cr=res.headers.get('content-range')||'';
     var total=parseInt((cr.split('/')[1]||'0'),10)||0;
-    return res.json().then(function(data){return {data:data,total:total};});
+    return res.json().then(function(data){
+      // Se non è un array è un oggetto errore PostgREST (es. JWT expired): trattalo come errore
+      if(!Array.isArray(data)) throw {kind:'postgrest', data:data, status:res.status};
+      return {data:data,total:total};
+    });
   }).then(function(result){
     hideLoader();
-    var records=result.data.map(function(r){
-      return {
-        id:r.id,rowIndex:r.id,
-        tsFormatted:formatTSFromISO(r.timestamp_chiamata),
-        postazione:r.postazione||'',descrizione:r.descrizione||'',note:r.note||'',completato:!!r.completato,
-        girata_a_user_id:r.girata_a_user_id||null,
-        girata_a_nome:r.girata_a_nome||'',
-        girata_a_at:r.girata_a_at||null,
-        girata_da_user_id:r.girata_da_user_id||null,
-        girata_da_nome:r.girata_da_nome||'',
-        girata_da_at:r.girata_da_at||null
-      };
-    });
-    drawRows(records,null);
-    drawPgn(result.total,pg,CURRENT_PAGE_SIZE);
-    var inf=result.total>0?result.total+' chiamat'+(result.total===1?'a':'e')+' in totale':'';
-    if(showIncompleteOnly&&result.total>0)inf='⏳ '+result.total+' in attesa';
-    (els.linfo||document.getElementById('linfo')).textContent=inf;
-    // Marca le righe che hanno un sync in coda
-    var pendingIds=syncLoadQueue().map(function(e){return String(e.id);});
-    if(pendingIds.length){
-      pendingIds.forEach(function(id){
-        var tr=document.querySelector('tr[data-row="'+id+'"]');
-        if(tr)tr.classList.add('pending-sync');
-      });
-    }
+    var records=result.data.map(mapServerRow);
+    // Cache dell'elenco (solo pagina 1 senza filtri) per apertura offline
+    if(pg===1 && !showIncompleteOnly && !currentFilters) cacheServerRows(records, result.total);
+    renderListWithPending(records, result.total, pg);
   }).catch(function(e){
     hideLoader();
-    (els.tbody||document.getElementById('tbody')).innerHTML='<tr><td colspan="5"><div class="emp"><h3>Errore server</h3><p>'+(e&&e.message?e.message:'Controlla la connessione.')+'</p></div></td></tr>';
+    renderOfflineFallback(pg, e);
   });
+}
+
+// Mappa una riga server nel formato usato da drawRows
+function mapServerRow(r){
+  return {
+    id:r.id,rowIndex:r.id,
+    tsFormatted:formatTSFromISO(r.timestamp_chiamata),
+    postazione:r.postazione||'',descrizione:r.descrizione||'',note:r.note||'',completato:!!r.completato,
+    girata_a_user_id:r.girata_a_user_id||null,
+    girata_a_nome:r.girata_a_nome||'',
+    girata_a_at:r.girata_a_at||null,
+    girata_da_user_id:r.girata_da_user_id||null,
+    girata_da_nome:r.girata_da_nome||'',
+    girata_da_at:r.girata_da_at||null
+  };
+}
+
+// Converte una voce "insert" della coda in un record renderizzabile (riga "in attesa")
+function pendingInsertToRecord(e){
+  var b=e.body||{};
+  return {
+    id:'local_'+e.client_uuid, client_uuid:e.client_uuid, localPending:true,
+    tsFormatted:formatTSFromISO(b.timestamp_chiamata),
+    postazione:b.postazione||'', descrizione:b.descrizione||'', note:b.note||'', completato:false
+  };
+}
+
+// Renderizza server rows + eventuali chiamate locali in attesa (in cima, solo pag.1 senza filtri)
+function renderListWithPending(records,total,pg){
+  var merged=records;
+  var pendingCount=0;
+  if(pg===1 && !currentFilters && !showIncompleteOnly){
+    var inserts=loadPendingInserts().map(pendingInsertToRecord);
+    pendingCount=inserts.length;
+    merged=inserts.concat(records);
+  }
+  drawRows(merged,null);
+  drawPgn(total,pg,CURRENT_PAGE_SIZE);
+  var inf=total>0?total+' chiamat'+(total===1?'a':'e')+' in totale':'';
+  if(showIncompleteOnly&&total>0)inf='⏳ '+total+' in attesa';
+  if(pendingCount>0) inf=(inf?inf+' · ':'')+'📋 '+pendingCount+' in invio';
+  (els.linfo||document.getElementById('linfo')).textContent=inf;
+  // Marca le righe (update) che hanno un sync in coda
+  var pendingIds=syncLoadQueue().filter(function(e){return e.type!=='insert';}).map(function(e){return String(e.id);});
+  pendingIds.forEach(function(id){
+    var tr=document.querySelector('tr[data-row="'+id+'"]');
+    if(tr)tr.classList.add('pending-sync');
+  });
+}
+
+// Fallback quando il caricamento fallisce (offline / rete): mostra cache + pending,
+// MAI "Errore server" con JSON grezzo, MAI perdita delle chiamate locali.
+function renderOfflineFallback(pg, e){
+  var inserts=loadPendingInserts().map(pendingInsertToRecord);
+  var cached=loadCachedRows();
+  var serverRecs=(pg===1 && cached && cached.records)?cached.records:[];
+  var merged=(pg===1)?inserts.concat(serverRecs):serverRecs;
+
+  if(merged.length===0){
+    (els.tbody||document.getElementById('tbody')).innerHTML=
+      '<tr><td colspan="5"><div class="emp">'
+      +'<svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M1 1l22 22"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55M5 12.55a10.94 10.94 0 0 1 5.17-2.39M10.71 5.05A16 16 0 0 1 22.58 9M1.42 9a15.91 15.91 0 0 1 4.7-2.88M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>'
+      +'<h3>Nessuna connessione</h3><p>Riprova appena torni online. Le chiamate che registri adesso vengono salvate in locale e inviate automaticamente al ritorno della linea.</p></div></td></tr>';
+    drawPgn(0,1,CURRENT_PAGE_SIZE);
+    (els.linfo||document.getElementById('linfo')).textContent='Offline';
+    return;
+  }
+  drawRows(merged,null);
+  drawPgn(0,1,CURRENT_PAGE_SIZE);
+  var parts=[];
+  if(inserts.length) parts.push('📋 '+inserts.length+' in invio');
+  parts.push('offline · elenco in cache');
+  (els.linfo||document.getElementById('linfo')).textContent=parts.join(' · ');
 }
 
 function drawRows(recs,highlightQuery){
@@ -1769,6 +1880,8 @@ function drawRows(recs,highlightQuery){
   });
 
   tb.innerHTML=recs.map(function(r){
+    // Riga chiamata salvata solo in locale (in attesa di invio al server)
+    if(r.localPending) return renderPendingInsertRow(r);
     var tsf=r.tsFormatted||'';
     var parts=tsf.split(' ');
     var ds=parts[0]||'',ts=parts[1]||'';
@@ -1839,6 +1952,36 @@ function drawRows(recs,highlightQuery){
   // Listener attaccati una sola volta al boot via setupTableDelegation()
 }
 
+// Riga di una chiamata registrata offline, non ancora inviata al server.
+// Non è modificabile inline (diventerà normale appena sincronizzata); si può
+// solo eliminare (rimuove dalla coda locale). data-field su desc/note serve
+// solo al layout a card del mobile, NON sono contenteditable.
+function renderPendingInsertRow(r){
+  var tsf=r.tsFormatted||'';
+  var parts=tsf.split(' ');
+  var ds=parts[0]||'', ts=parts[1]||'';
+  var pc=getColor(r.postazione);
+  var descHtml=linkifyAddresses(linkifyPhones(esc(r.descrizione||'')));
+  var noteHtml=linkifyAddresses(linkifyPhones(esc(r.note||'')));
+  var badge='<span class="girata-badge pending" contenteditable="false" title="Salvata sul dispositivo, in attesa di invio al server">'
+    +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>'
+    +'Solo in locale — in attesa di invio</span>';
+  var clock='<div class="iho-localwait" title="In attesa di invio al server"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>';
+  var delBtn='<div class="idel-local" data-uuid="'+esc(r.client_uuid)+'" title="Elimina questa chiamata locale (non ancora inviata)">'
+    +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div>';
+  return '<tr class="local-pending" data-uuid="'+esc(r.client_uuid)+'">'
+    +'<td class="tds"><div class="sc">'+clock+delBtn+'</div></td>'
+    +'<td class="tid">—</td>'
+    +'<td class="tdt"><div class="dt-wrap">'
+      +'<span class="dt-date">'+esc(ds)+'</span>'
+      +'<span class="dt-time">'+esc(ts)+'</span>'
+      +'<span class="ptag" style="background:'+pc+';cursor:default">'+esc(r.postazione||'—')+'</span>'
+    +'</div></td>'
+    +'<td data-field="descrizione" style="white-space:pre-wrap;min-width:180px">'+badge+'<br>'+descHtml+'</td>'
+    +'<td data-field="note" style="white-space:pre-wrap">'+noteHtml+'</td>'
+  +'</tr>';
+}
+
 // ───────────────────────────────────────────────────────────
 // CODA SINCRONIZZAZIONE OFFLINE
 // Persiste in localStorage le modifiche non riuscite.
@@ -1850,7 +1993,7 @@ function syncLoadQueue(){
   try{var raw=localStorage.getItem(SYNC_QUEUE_KEY);return raw?JSON.parse(raw):[];}catch(e){return [];}
 }
 function syncSaveQueue(q){
-  try{localStorage.setItem(SYNC_QUEUE_KEY,JSON.stringify(q));}catch(e){}
+  try{localStorage.setItem(SYNC_QUEUE_KEY,JSON.stringify(q));return true;}catch(e){return false;}
 }
 function syncEnqueue(rowId,body){
   var q=syncLoadQueue();
@@ -1866,26 +2009,141 @@ function syncDequeue(rowId){
   syncRenderBadge();
 }
 
+// ───────────────────────────────────────────────────────────
+// OUTBOX INSERT: nuove chiamate registrate offline (o con invio fallito).
+// Le voci "insert" hanno forma {type:'insert', client_uuid, body, ts, attempts}.
+// Le voci "update" (modifiche a righe esistenti) restano {id, body, ts, attempts}.
+// client_uuid rende l'inserimento IDEMPOTENTE: se la stessa chiamata viene
+// inviata due volte (rete ballerina), l'indice unico su chiamate.client_uuid
+// impedisce il duplicato (il secondo POST torna 409 → trattato come successo).
+// ───────────────────────────────────────────────────────────
+function newClientUuid(){
+  try{ if(window.crypto && crypto.randomUUID) return crypto.randomUUID(); }catch(_){}
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){
+    var r=Math.random()*16|0, v=(c==='x')?r:((r&0x3)|0x8); return v.toString(16);
+  });
+}
+function syncEnqueueInsert(clientUuid, body){
+  var q=syncLoadQueue();
+  q=q.filter(function(e){return !(e.type==='insert' && e.client_uuid===clientUuid);});
+  q.push({type:'insert', client_uuid:clientUuid, body:body, ts:Date.now(), attempts:0});
+  var ok=syncSaveQueue(q);
+  syncRenderBadge();
+  return ok; // false = localStorage non disponibile (modalità privata / memoria piena)
+}
+function syncDequeueInsert(clientUuid){
+  var q=syncLoadQueue().filter(function(e){return !(e.type==='insert' && e.client_uuid===clientUuid);});
+  syncSaveQueue(q);
+  syncRenderBadge();
+}
+function loadPendingInserts(){
+  return syncLoadQueue().filter(function(e){return e.type==='insert';});
+}
+
+// Invio singolo di una insert (con rinnovo JWT + retry e gestione 409 idempotente).
+// Ritorna Promise<bool>: true = salvata sul server (o già presente), false = resta in coda.
+function syncOneInsert(clientUuid, body){
+  markOwnWrite();
+  var post=function(){
+    return sbFetch('chiamate',{method:'POST',body:body,prefer:'return=minimal'});
+  };
+  return post().then(function(res){
+    if(res.ok || res.status===409){ syncDequeueInsert(clientUuid); return true; }
+    if(res.status===401){
+      return ensureFreshToken().then(function(){
+        return post().then(function(r2){
+          if(r2.ok || r2.status===409){ syncDequeueInsert(clientUuid); return true; }
+          return false;
+        });
+      });
+    }
+    return false;
+  }).catch(function(){ return false; });
+}
+
+// ───────────────────────────────────────────────────────────
+// CACHE ultima lista server: consente di aprire l'app OFFLINE e vedere
+// comunque l'ultimo elenco noto (invece di "Errore server").
+// ───────────────────────────────────────────────────────────
+var CHIAMATE_CACHE_KEY='chiamateCache_v1';
+function cacheServerRows(records,total){
+  try{ localStorage.setItem(CHIAMATE_CACHE_KEY, JSON.stringify({ts:Date.now(),records:records,total:total})); }catch(_){}
+}
+function loadCachedRows(){
+  try{ var raw=localStorage.getItem(CHIAMATE_CACHE_KEY); return raw?JSON.parse(raw):null; }catch(_){ return null; }
+}
+
+// ───────────────────────────────────────────────────────────
+// BOZZA form nuova chiamata: salva in continuo ciò che stai scrivendo,
+// così un crash / ricarica PRIMA di premere Salva non perde nulla.
+// ───────────────────────────────────────────────────────────
+var DRAFT_KEY='newCallDraft_v1';
+var _draftTimer=null;
+function saveDraftDebounced(){
+  if(_draftTimer)clearTimeout(_draftTimer);
+  _draftTimer=setTimeout(saveDraftNow,400);
+}
+function saveDraftNow(){
+  try{
+    var d=(document.getElementById('txd')||{}).value||'';
+    var n=(document.getElementById('txn')||{}).value||'';
+    var dtEl=document.getElementById('dtxt');
+    var dt=dtEl?(dtEl.innerText||''):'';
+    if(!d.trim() && !n.trim()){ localStorage.removeItem(DRAFT_KEY); return; }
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({d:d,n:n,dt:dt,ts:Date.now()}));
+  }catch(_){}
+}
+function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(_){} }
+function restoreDraft(){
+  try{
+    var raw=localStorage.getItem(DRAFT_KEY); if(!raw)return;
+    var o=JSON.parse(raw); if(!o || (!o.d && !o.n))return;
+    var txd=document.getElementById('txd'); if(txd && !txd.value) txd.value=o.d||'';
+    var txn=document.getElementById('txn'); if(txn && !txn.value) txn.value=o.n||'';
+    var dtx=document.getElementById('dtxt');
+    if(dtx && o.dt && o.dt.trim() && (dtx.textContent==='—' || !dtx.textContent.trim())){
+      dtx.textContent=o.dt; attachFormDateListeners();
+    }
+    if(o.d || o.n){
+      fb(true,'Bozza recuperata','Ho ripristinato la chiamata che stavi scrivendo. Controlla i dati e premi Salva.');
+    }
+  }catch(_){}
+}
+
 function syncProcess(){
   if(typeof navigator!=='undefined'&&navigator.onLine===false)return;
   var q=syncLoadQueue();
   if(!q.length)return;
-  // Processa in parallelo
-  markOwnWrite();
-  Promise.all(q.map(function(entry){
-    entry.attempts=(entry.attempts||0)+1;
-    return sbFetch('chiamate?id=eq.'+entry.id,{
-      method:'PATCH',body:entry.body,prefer:'return=minimal'
-    }).then(function(res){
-      return res.ok?{ok:true,id:entry.id}:{ok:false,id:entry.id};
-    }).catch(function(){return {ok:false,id:entry.id};});
-  })).then(function(results){
-    var failed=results.filter(function(r){return !r.ok;}).map(function(r){return String(r.id);});
-    var newQ=syncLoadQueue().filter(function(e){return failed.indexOf(String(e.id))!==-1;});
-    syncSaveQueue(newQ);
-    syncRenderBadge();
-    var ok=results.length-failed.length;
-    if(ok>0&&failed.length===0)loadRows(PAGE); // refresh elenco se tutto sincronizzato
+  // Rinnova il token PRIMA di drenare la coda (evita 401 su token scaduto)
+  ensureFreshToken().then(function(){
+    var q2=syncLoadQueue();
+    if(!q2.length)return;
+    markOwnWrite();
+    Promise.all(q2.map(function(entry){
+      entry.attempts=(entry.attempts||0)+1;
+      if(entry.type==='insert'){
+        var key='ins:'+entry.client_uuid;
+        return sbFetch('chiamate',{method:'POST',body:entry.body,prefer:'return=minimal'})
+          .then(function(res){ return {ok:(res.ok||res.status===409), key:key}; })
+          .catch(function(){ return {ok:false, key:key}; });
+      } else {
+        var ukey='upd:'+entry.id;
+        return sbFetch('chiamate?id=eq.'+entry.id,{method:'PATCH',body:entry.body,prefer:'return=minimal'})
+          .then(function(res){ return {ok:res.ok, key:ukey}; })
+          .catch(function(){ return {ok:false, key:ukey}; });
+      }
+    })).then(function(results){
+      var okKeys={};
+      results.forEach(function(r){ if(r.ok) okKeys[r.key]=true; });
+      var newQ=syncLoadQueue().filter(function(e){
+        var k = (e.type==='insert') ? ('ins:'+e.client_uuid) : ('upd:'+e.id);
+        return !okKeys[k];
+      });
+      syncSaveQueue(newQ);
+      syncRenderBadge();
+      var anyOk=results.some(function(r){return r.ok;});
+      if(anyOk) loadRows(PAGE); // refresh elenco se almeno una è andata a buon fine
+    });
   });
 }
 
@@ -1901,6 +2159,16 @@ function syncRenderBadge(){
     document.body.appendChild(existing);
   }
   var offline=(typeof navigator!=='undefined'&&navigator.onLine===false);
+  var inserts=q.filter(function(e){return e.type==='insert';}).length;
+  var updates=q.length-inserts;
+  var label;
+  if(inserts>0 && updates>0){
+    label=inserts+' chiamat'+(inserts===1?'a':'e')+' + '+updates+' modific'+(updates===1?'a':'he')+' da inviare';
+  } else if(inserts>0){
+    label=inserts+' chiamat'+(inserts===1?'a nuova':'e nuove')+' da inviare';
+  } else {
+    label=updates+' modific'+(updates===1?'a':'he')+' in attesa';
+  }
   existing.className='sync-badge'+(offline?' offline':'');
   existing.innerHTML=
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">'
@@ -1908,7 +2176,7 @@ function syncRenderBadge(){
         ?'<line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/>'
         :'<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>')
     +'</svg>'
-    +'<span>'+(offline?'Offline · ':'')+q.length+' modific'+(q.length===1?'a':'he')+' in attesa</span>';
+    +'<span>'+(offline?'Offline · ':'')+label+'</span>';
 }
 
 // Innesco automatico: quando torna la connessione + ogni 30s + al boot
@@ -2101,6 +2369,17 @@ function setupTableDelegation(){
       startDelete(parseInt(idel.dataset.row),idel.dataset.desc,idel);
       return;
     }
+
+    var idelLocal=t.closest('.idel-local');
+    if(idelLocal){
+      e.stopPropagation();
+      var uuid=idelLocal.dataset.uuid;
+      if(window.confirm('Eliminare questa chiamata salvata in locale?\n\nNon è ancora stata inviata al server: verrà eliminata definitivamente e NON sarà recuperabile.')){
+        syncDequeueInsert(uuid);
+        loadRows(PAGE);
+      }
+      return;
+    }
   });
 
   // INPUT su [contenteditable] → markDirty
@@ -2194,6 +2473,7 @@ function setupTableDelegation(){
 
 function markDirty(tr){
   var ri=tr.dataset.row;
+  if(!ri)return; // righe "in attesa" (solo locali) non hanno data-row: non tracciarle
   dirtyMap[ri]={rowIndex:parseInt(ri),tr:tr};
   var isv=tr.querySelector('.isv');if(isv)isv.style.display='flex';
 }
