@@ -1847,7 +1847,26 @@ function renderListWithPending(records,total,pg){
 function renderOfflineFallback(pg, e){
   var inserts=loadPendingInserts().map(pendingInsertToRecord);
   var cached=loadCachedRows();
-  var serverRecs=(pg===1 && cached && cached.records)?cached.records:[];
+  var serverRecs=(pg===1 && cached && cached.records)?cached.records.slice():[];
+
+  // Applica le modifiche ancora in coda (update) sui record in cache: così un
+  // reload OFFLINE mostra comunque le correzioni fatte (già salvate in coda).
+  var updates=syncLoadQueue().filter(function(x){return x.type!=='insert';});
+  if(updates.length && serverRecs.length){
+    var byId={};
+    updates.forEach(function(u){ byId[String(u.id)]=u.body||{}; });
+    serverRecs=serverRecs.map(function(r){
+      var b=byId[String(r.id)]; if(!b) return r;
+      var m={}; for(var k in r){ if(r.hasOwnProperty(k)) m[k]=r[k]; }
+      if('descrizione' in b) m.descrizione=b.descrizione;
+      if('note' in b) m.note=b.note;
+      if('postazione' in b) m.postazione=b.postazione;
+      if(b.timestamp_chiamata) m.tsFormatted=formatTSFromISO(b.timestamp_chiamata);
+      m._pendingEdit=true;
+      return m;
+    });
+  }
+
   var merged=(pg===1)?inserts.concat(serverRecs):serverRecs;
 
   if(merged.length===0){
@@ -1861,8 +1880,15 @@ function renderOfflineFallback(pg, e){
   }
   drawRows(merged,null);
   drawPgn(0,1,CURRENT_PAGE_SIZE);
+  // Marca le righe con modifica in coda
+  var updIds=updates.map(function(u){return String(u.id);});
+  updIds.forEach(function(id){
+    var tr=document.querySelector('tr[data-row="'+id+'"]');
+    if(tr)tr.classList.add('pending-sync');
+  });
   var parts=[];
   if(inserts.length) parts.push('📋 '+inserts.length+' in invio');
+  if(updIds.length) parts.push('✏️ '+updIds.length+' modific'+(updIds.length===1?'a':'he')+' in coda');
   parts.push('offline · elenco in cache');
   (els.linfo||document.getElementById('linfo')).textContent=parts.join(' · ');
 }
@@ -2508,7 +2534,17 @@ function getCellTextNoBadge(tr, field){
     if(nx && nx.nodeType===1 && nx.tagName==='BR') nx.parentNode.removeChild(nx);
     b.parentNode.removeChild(b);
   });
-  return (clone.innerText||'').trim();
+  // innerText restituisce i ritorni a capo (<br>/<div> inseriti premendo Invio)
+  // SOLO se l'elemento è renderizzato: su un nodo staccato si comporta come
+  // textContent e li perde. Quindi attacco il clone fuori schermo, leggo, stacco.
+  clone.style.position='absolute';
+  clone.style.left='-99999px';
+  clone.style.top='0';
+  clone.style.whiteSpace='pre-wrap';
+  document.body.appendChild(clone);
+  var txt = clone.innerText || '';
+  if(clone.parentNode) clone.parentNode.removeChild(clone);
+  return txt.trim();
 }
 
 function getFormattedTs(tr){
