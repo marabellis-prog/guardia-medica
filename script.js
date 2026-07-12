@@ -1321,6 +1321,10 @@ document.addEventListener('DOMContentLoaded',function(){
       var body=buildPatchBodyFromRow(info.tr);
       if(body)syncEnqueue(k,body);
     });
+    // Flush immediato delle modifiche alle righe locali (in attesa), per non
+    // perdere l'ultimo carattere digitato se si chiude prima del debounce.
+    var lp=document.querySelectorAll('tr.local-pending');
+    for(var i=0;i<lp.length;i++){ try{ saveLocalRowNow(lp[i]); }catch(_e){} }
   });
 
   // Badge "in coda di sync" è basato su localStorage, non richiede auth
@@ -1979,14 +1983,18 @@ function drawRows(recs,highlightQuery){
 }
 
 // Riga di una chiamata registrata offline, non ancora inviata al server.
-// Non è modificabile inline (diventerà normale appena sincronizzata); si può
-// solo eliminare (rimuove dalla coda locale). data-field su desc/note serve
-// solo al layout a card del mobile, NON sono contenteditable.
+// È MODIFICABILE inline (descrizione, note, postazione, data/ora): le modifiche
+// vengono scritte nella voce di coda (per client_uuid), così quando torna la
+// linea parte la versione corretta. Si può anche eliminare (rimuove dalla coda).
 function renderPendingInsertRow(r){
   var tsf=r.tsFormatted||'';
   var parts=tsf.split(' ');
   var ds=parts[0]||'', ts=parts[1]||'';
   var pc=getColor(r.postazione);
+  var ddOpts=POST.map(function(p){
+    return '<div class="post-opt" data-nome="'+esc(p.nome)+'" data-colore="'+esc(p.colore||'#2e7d5e')+'">'
+      +'<span class="post-dot" style="background:'+esc(p.colore||'#2e7d5e')+'"></span>'+esc(p.nome)+'</div>';
+  }).join('');
   var descHtml=linkifyAddresses(linkifyPhones(esc(r.descrizione||'')));
   var noteHtml=linkifyAddresses(linkifyPhones(esc(r.note||'')));
   var badge='<span class="girata-badge pending" contenteditable="false" title="Salvata sul dispositivo, in attesa di invio al server">'
@@ -1995,17 +2003,55 @@ function renderPendingInsertRow(r){
   var clock='<div class="iho-localwait" title="In attesa di invio al server"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>';
   var delBtn='<div class="idel-local" data-uuid="'+esc(r.client_uuid)+'" title="Elimina questa chiamata locale (non ancora inviata)">'
     +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div>';
-  return '<tr class="local-pending" data-uuid="'+esc(r.client_uuid)+'">'
+  return '<tr class="local-pending" data-uuid="'+esc(r.client_uuid)+'" data-original-ts="'+esc(tsf)+'">'
     +'<td class="tds"><div class="sc">'+clock+delBtn+'</div></td>'
     +'<td class="tid">—</td>'
     +'<td class="tdt"><div class="dt-wrap">'
-      +'<span class="dt-date">'+esc(ds)+'</span>'
-      +'<span class="dt-time">'+esc(ts)+'</span>'
-      +'<span class="ptag" style="background:'+pc+';cursor:default">'+esc(r.postazione||'—')+'</span>'
+      +'<span class="dt-date" contenteditable="true" data-field="dt-date" spellcheck="false">'+esc(ds)+'</span>'
+      +'<span class="dt-time" contenteditable="true" data-field="dt-time" spellcheck="false">'+esc(ts)+'</span>'
+      +'<span class="ptag" data-field="postazione" data-nome="'+esc(r.postazione||'')+'" style="background:'+pc+'">'
+        +esc(r.postazione||'—')
+        +'<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>'
+        +'<div class="post-dropdown">'+ddOpts+'</div>'
+      +'</span>'
     +'</div></td>'
-    +'<td data-field="descrizione" style="white-space:pre-wrap;min-width:180px">'+badge+'<br>'+descHtml+'</td>'
-    +'<td data-field="note" style="white-space:pre-wrap">'+noteHtml+'</td>'
+    +'<td data-field="descrizione" contenteditable="true" spellcheck="false" style="white-space:pre-wrap;min-width:180px">'+badge+'<br>'+descHtml+'</td>'
+    +'<td data-field="note" contenteditable="true" spellcheck="false" style="white-space:pre-wrap">'+noteHtml+'</td>'
   +'</tr>';
+}
+
+// ── AUTOSAVE riga LOCALE: scrive le modifiche nella voce di coda (client_uuid),
+//    non sul server (la chiamata non è ancora stata inviata). ────────────────
+var localAutosaveTimers={};
+function scheduleLocalAutosave(tr){
+  var uuid=tr&&tr.dataset&&tr.dataset.uuid; if(!uuid)return;
+  if(localAutosaveTimers[uuid])clearTimeout(localAutosaveTimers[uuid]);
+  localAutosaveTimers[uuid]=setTimeout(function(){
+    delete localAutosaveTimers[uuid];
+    if(document.body.contains(tr)) saveLocalRowNow(tr);
+  },700);
+}
+function saveLocalRowNow(tr){
+  var uuid=tr&&tr.dataset&&tr.dataset.uuid; if(!uuid)return;
+  if(localAutosaveTimers[uuid]){clearTimeout(localAutosaveTimers[uuid]);delete localAutosaveTimers[uuid];}
+  var q=syncLoadQueue();
+  var idx=-1;
+  for(var i=0;i<q.length;i++){ if(q[i].type==='insert' && q[i].client_uuid===uuid){ idx=i; break; } }
+  if(idx===-1)return; // già sincronizzata/rimossa dalla coda: niente da aggiornare
+  var po=tr.querySelector('[data-field="postazione"]')?(tr.querySelector('[data-field="postazione"]').dataset.nome||''):'';
+  var de=sanitizeText(getCellTextNoBadge(tr,'descrizione'));
+  var no=sanitizeText(getCellTextNoBadge(tr,'note'));
+  var tsNow=getFormattedTs(tr);
+  var b=q[idx].body||{};
+  b.postazione=po; b.descrizione=de; b.note=no;
+  var tsISO=italianToISO(tsNow); if(tsISO){ b.timestamp_chiamata=tsISO; tr.dataset.originalTs=tsNow; }
+  q[idx].body=b;
+  var ok=syncSaveQueue(q);
+  if(ok){
+    tr.classList.add('saved-pulse');
+    setTimeout(function(){tr.classList.remove('saved-pulse');},900);
+    relinkifyRow(tr);
+  }
 }
 
 // ───────────────────────────────────────────────────────────
@@ -2363,7 +2409,8 @@ function setupTableDelegation(){
       ptag.childNodes[0].textContent=nome;
       ptag.querySelector('.post-dropdown').classList.remove('open');
       trO.classList.remove('has-open-dd');
-      markDirty(trO);
+      if(trO.classList.contains('local-pending')){ saveLocalRowNow(trO); }
+      else { markDirty(trO); }
       return;
     }
 
@@ -2408,10 +2455,12 @@ function setupTableDelegation(){
     }
   });
 
-  // INPUT su [contenteditable] → markDirty
+  // INPUT su [contenteditable] → markDirty (righe server) / autosave locale (righe in attesa)
   tbody.addEventListener('input',function(e){
     if(!e.target.hasAttribute||!e.target.hasAttribute('contenteditable'))return;
-    var tr=e.target.closest('tr');if(tr)markDirty(tr);
+    var tr=e.target.closest('tr');if(!tr)return;
+    if(tr.classList.contains('local-pending')){ scheduleLocalAutosave(tr); return; }
+    markDirty(tr);
   });
 
   // PASTE → solo testo plain
@@ -2434,7 +2483,8 @@ function setupTableDelegation(){
     range.insertNode(frag);
     range.collapse(false);
     sel.removeAllRanges();sel.addRange(range);
-    var tr=el.closest('tr');if(tr)markDirty(tr);
+    var tr=el.closest('tr');
+    if(tr){ if(tr.classList.contains('local-pending'))scheduleLocalAutosave(tr); else markDirty(tr); }
   });
 
   // DROP → solo testo plain
@@ -2483,16 +2533,19 @@ function setupTableDelegation(){
     var tr=el.closest('tr');
     var isDate=el.classList.contains('dt-date');
     var isTime=el.classList.contains('dt-time');
+    var isLocal=tr&&tr.classList.contains('local-pending');
     if(isDate||isTime){
       var raw=(el.innerText||'').trim();
       if(raw){
         var fmt=isDate?autoformatDate(raw):autoformatTime(raw);
         if(fmt){el.innerText=fmt;setFieldError(el,false);}
         else{setFieldError(el,isDate?!isValidDate(raw):!isValidTime(raw));}
-        if(tr)markDirty(tr);
+        if(tr&&!isLocal)markDirty(tr);
       }
     }
-    // Pianifica autosave se la riga è dirty
+    // Righe in attesa (locali): salva subito nella coda al blur di qualsiasi campo
+    if(isLocal){ saveLocalRowNow(tr); return; }
+    // Pianifica autosave se la riga (server) è dirty
     if(tr&&tr.dataset.row&&dirtyMap[tr.dataset.row])scheduleAutosave(tr);
   });
 }
@@ -4301,7 +4354,7 @@ function commitAddrEdit(){
     addrModalSpan.textContent=raw;
     addrModalSpan.dataset.addr=raw;
     var tr=addrModalSpan.closest('tr');
-    if(tr)markDirty(tr);
+    if(tr){ if(tr.classList.contains('local-pending'))saveLocalRowNow(tr); else markDirty(tr); }
   }
   addrModalQuery=raw;
   var view=document.getElementById('maddrText');
@@ -4402,7 +4455,7 @@ function commitPhoneEdit(){
     phoneModalSpan.textContent=raw;
     phoneModalSpan.dataset.phone=digits;
     var tr=phoneModalSpan.closest('tr');
-    if(tr)markDirty(tr);
+    if(tr){ if(tr.classList.contains('local-pending'))saveLocalRowNow(tr); else markDirty(tr); }
   }
   // Aggiorna stato modal
   phoneModalNumber=digits;
