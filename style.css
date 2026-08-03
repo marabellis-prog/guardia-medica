@@ -674,6 +674,84 @@ tbody tr.local-pending{
   .iho-gira{width:36px;height:36px}
 }
 
+/* ═══════════════════════════════════════
+   ALLEGATI (Google Drive)
+═══════════════════════════════════════ */
+/* Bottone graffetta nelle azioni della riga */
+.iho-attach{
+  width:32px;height:32px;border-radius:var(--r1);
+  display:flex;align-items:center;justify-content:center;
+  background:var(--surface2);color:var(--txm);border:1px solid var(--bord);
+  cursor:pointer;transition:all var(--tr);flex-shrink:0;
+}
+.iho-attach:hover{background:var(--prl);color:var(--pr);border-color:var(--pr);transform:scale(1.05)}
+[data-theme="dark"] .iho-attach:hover{color:var(--pr)}
+
+/* Riga "Allegati" sotto la chiamata */
+tbody tr.attach-row{background:var(--surface2)}
+tbody tr.attach-row:hover{background:var(--surface2)}
+tbody tr.attach-row td{padding:.35rem 1rem .5rem;border-bottom:1px solid var(--div);vertical-align:top}
+.attach-label{
+  text-align:right;padding-right:10%!important;
+  font-weight:700;color:var(--txm);font-size:.82rem;white-space:nowrap;
+  text-transform:uppercase;letter-spacing:.04em;
+}
+.attach-list{display:flex;flex-wrap:wrap;gap:.35rem .7rem;align-items:center}
+.attach-item{
+  display:inline-flex;align-items:center;gap:.25rem;
+  padding:.15rem .3rem .15rem .45rem;border-radius:99px;
+  background:var(--surface);border:1px solid var(--bord);
+  transition:background var(--tr),border-color var(--tr);max-width:100%;
+}
+.attach-item:hover{background:var(--prl);border-color:var(--pr)}
+.attach-name{
+  display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;
+  color:var(--pr);font-size:.85rem;font-weight:600;min-width:0;
+}
+.attach-name svg{flex-shrink:0;opacity:.85}
+.attach-fname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:220px}
+.attach-name:hover .attach-fname{text-decoration:underline;text-underline-offset:2px}
+.attach-del{
+  display:none;align-items:center;justify-content:center;cursor:pointer;
+  color:var(--er);width:22px;height:22px;border-radius:50%;flex-shrink:0;
+  transition:background var(--tr);
+}
+.attach-item:hover .attach-del{display:inline-flex}
+.attach-del:hover{background:var(--erbg)}
+/* Su touch (niente hover) il cestino è sempre visibile */
+@media(hover:none){ .attach-del{display:inline-flex} }
+
+/* Modal upload: dropzone + lista file selezionati */
+.attach-drop{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.5rem;
+  margin-top:1rem;padding:1.4rem 1rem;border:2px dashed var(--bord);border-radius:var(--r2);
+  background:var(--surface2);color:var(--txm);cursor:pointer;transition:all var(--tr);text-align:center;
+}
+.attach-drop:hover{border-color:var(--pr);color:var(--pr);background:var(--prl)}
+.attach-drop svg{opacity:.8}
+.attach-sel-list{margin-top:.75rem;display:flex;flex-direction:column;gap:.4rem;max-height:34vh;overflow-y:auto}
+.attach-sel-item{
+  display:flex;align-items:center;gap:.5rem;padding:.5rem .7rem;
+  background:var(--surface2);border:1px solid var(--bord);border-radius:var(--r2);font-size:.85rem;
+}
+.attach-sel-item svg{color:var(--pr);flex-shrink:0}
+.attach-sel-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;font-weight:500}
+.attach-sel-size{color:var(--txm);font-size:.78rem;flex-shrink:0}
+.attach-progress{margin-top:.85rem;padding:.6rem .85rem;border-radius:8px;background:var(--prl);color:var(--pr);font-size:.85rem;font-weight:600;text-align:center}
+
+/* Mobile: la riga allegati diventa un blocco sotto la card */
+@media(max-width:640px){
+  .twrap tbody tr.attach-row{
+    display:block;background:var(--surface);
+    border:1px solid var(--bord);border-top:none;
+    border-radius:0 0 14px 14px;margin-top:-12px;margin-bottom:2px;
+    padding:8px 12px 10px;box-shadow:var(--sh1);
+  }
+  .twrap tbody tr.attach-row td{display:block;padding:0;border:none}
+  .attach-label{text-align:left;padding-right:0!important;margin-bottom:.35rem}
+  .attach-fname{max-width:calc(100vw - 120px)}
+}
+
 /* Link indirizzo cliccabile (apre Maps / Naviga) */
 .addr-link{display:inline;color:#1565c0;background:rgba(21,101,192,.10);border-radius:5px;padding:0 5px;margin:0 1px;cursor:pointer;font-weight:600;text-decoration:underline;text-decoration-color:rgba(21,101,192,.35);text-decoration-thickness:1.5px;text-underline-offset:3px;transition:background var(--tr),color var(--tr);user-select:text}
 .addr-link::before{content:"\1F4CD\00a0";font-size:.85em;opacity:.85;text-decoration:none}
