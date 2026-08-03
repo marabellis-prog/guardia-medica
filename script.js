@@ -1333,6 +1333,8 @@ document.addEventListener('DOMContentLoaded',function(){
   // GIRA CHIAMATA: wiring dei modali e del banner (delegation)
   setupGirateBannerDelegation();
   setupGirateModalsDelegation();
+  // ALLEGATI: wiring modali upload/elimina
+  setupAttachWiring();
 
   // Le altre operazioni (syncProcess, autoPurgeOld, refreshTrashBadge)
   // richiedono JWT e vengono lanciate dentro setupAuth dopo il login.
@@ -1792,6 +1794,9 @@ function loadRows(pg){
     // Cache dell'elenco (solo pagina 1 senza filtri) per apertura offline
     if(pg===1 && !showIncompleteOnly && !currentFilters) cacheServerRows(records, result.total);
     renderListWithPending(records, result.total, pg);
+    // Allegati: carica e inietta le righe "Allegati" (non blocca il render principale)
+    var attIds=records.map(function(r){return r.id;});
+    loadAttachmentsForCalls(attIds).then(injectAttachRows);
   }).catch(function(e){
     hideLoader();
     renderOfflineFallback(pg, e);
@@ -1950,6 +1955,9 @@ function drawRows(recs,highlightQuery){
       ?'<div class="ich"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>'
       :'<div class="iho" data-row="'+r.id+'"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg></div>';
 
+    // Bottone Allega: su tutte le chiamate già sul server (non sulle locali in attesa)
+    var attachBtn = '<div class="iho-attach" data-row="'+r.id+'" title="Allega file">'+svgAttach()+'</div>';
+
     // Bottone Gira: solo per chiamate non completate, non già girate (accettate), non in pending
     var giraBtn = '';
     var canGirare = !r.completato && !r.girata_a_user_id && !outgoingPendingMap[r.id];
@@ -1963,7 +1971,7 @@ function drawRows(recs,highlightQuery){
       +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
       +'</div>';
     return '<tr class="'+(r.completato?'done':'pending')+'" data-row="'+r.id+'" data-original-ts="'+esc(tsf)+'">'
-      +'<td class="tds"><div class="sc">'+si+'<div class="isv" data-row="'+r.id+'" style="display:none">'+svgFloppy()+'</div>'+giraBtn+cestino+'</div></td>'
+      +'<td class="tds"><div class="sc">'+si+'<div class="isv" data-row="'+r.id+'" style="display:none">'+svgFloppy()+'</div>'+attachBtn+giraBtn+cestino+'</div></td>'
       +'<td class="tid">'+r.id+'</td>'
       +'<td class="tdt"><div class="dt-wrap">'
         +'<span class="dt-date" contenteditable="true" data-field="dt-date" spellcheck="false">'+esc(ds)+'</span>'
@@ -2377,6 +2385,27 @@ function setupTableDelegation(){
       openAddrModal(addr.dataset.addr||addr.textContent,addr);
       return;
     }
+    var attBtn=t.closest('.iho-attach');
+    if(attBtn){
+      e.stopPropagation();
+      openAttachModal(parseInt(attBtn.dataset.row));
+      return;
+    }
+    var attName=t.closest('.attach-name');
+    if(attName){
+      e.stopPropagation();e.preventDefault();
+      var itDown=attName.closest('.attach-item');
+      startAttachDownload(itDown.dataset.drive, itDown.dataset.name);
+      return;
+    }
+    var attDel=t.closest('.attach-del');
+    if(attDel){
+      e.stopPropagation();e.preventDefault();
+      var itDel=attDel.closest('.attach-item');
+      promptAttachDelete(itDel.dataset.id, itDel.dataset.drive, itDel.dataset.name);
+      return;
+    }
+
     var giraEl=t.closest('.iho-gira');
     if(giraEl){
       e.stopPropagation();
@@ -3303,6 +3332,8 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('madminDel')){chiudi('madminDel');adminUserToDelete=null;}
   if(e.target===document.getElementById('mgira'))closeGiraModal();
   if(e.target===document.getElementById('mgiraConf')){chiudi('mgiraConf');pendingGiraToUser=null;}
+  if(e.target===document.getElementById('mattach'))chiudi('mattach');
+  if(e.target===document.getElementById('mattachDel')){chiudi('mattachDel');attachToDelete=null;}
 });
 
 
@@ -4507,4 +4538,304 @@ function relinkifyRow(tr){
     var newHtml=preservedPrefix+newBody;
     if(newHtml!==cell.innerHTML)cell.innerHTML=newHtml;
   });
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// ALLEGATI: upload/download/delete file su Google Drive (scope drive.file)
+// - Token via Google Identity Services (GIS), client-side, nessun secret
+// - Cartella "allegati CA" creata/riusata nel Drive dell'utente collegato
+// - Metadati in tabella `allegati` (chiamata_id → drive_file_id, nome, ...)
+// ═══════════════════════════════════════════════════════════════════
+var DRIVE_FOLDER_NAME='allegati CA';
+var driveTokenClient=null;
+var driveAccessToken=null;
+var driveTokenExpiry=0;
+var driveFolderId=null;
+var attachmentsByCall={};       // { chiamata_id(str): [ {id, drive_file_id, file_name, ...} ] }
+var attachModalCallId=null;     // chiamata target del modal upload
+var attachToDelete=null;        // { id, drive_file_id, file_name }
+
+function driveConfigured(){
+  return typeof GOOGLE_OAUTH_CLIENT_ID==='string' && GOOGLE_OAUTH_CLIENT_ID.indexOf('.apps.googleusercontent.com')!==-1;
+}
+function isOnline(){ return !(typeof navigator!=='undefined' && navigator.onLine===false); }
+
+function loadGisLibrary(){ return loadScriptOnce('https://accounts.google.com/gsi/client'); }
+
+function initDriveTokenClient(){
+  return loadGisLibrary().then(function(){
+    if(!window.google || !google.accounts || !google.accounts.oauth2) throw new Error('GIS non disponibile');
+    if(!driveTokenClient){
+      driveTokenClient=google.accounts.oauth2.initTokenClient({
+        client_id: GOOGLE_OAUTH_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/drive.file',
+        callback: function(){}
+      });
+    }
+  });
+}
+
+// Ottiene un access token Drive (cache se valido; altrimenti richiede: silenzioso
+// se già consentito, popup di consenso la prima volta — sempre da user gesture).
+function getDriveToken(){
+  if(driveAccessToken && Date.now() < driveTokenExpiry-60000) return Promise.resolve(driveAccessToken);
+  if(!driveConfigured()) return Promise.reject(new Error('drive_not_configured'));
+  return initDriveTokenClient().then(function(){
+    return new Promise(function(resolve,reject){
+      driveTokenClient.callback=function(resp){
+        if(resp && resp.access_token){
+          driveAccessToken=resp.access_token;
+          driveTokenExpiry=Date.now()+((resp.expires_in||3600)*1000);
+          resolve(driveAccessToken);
+        } else { reject(new Error((resp&&resp.error)||'no_token')); }
+      };
+      driveTokenClient.error_callback=function(err){ reject(new Error((err&&err.type)||'popup_error')); };
+      try{ driveTokenClient.requestAccessToken(); }catch(e){ reject(e); }
+    });
+  });
+}
+
+function driveFetch(url,opts){
+  opts=opts||{};
+  return getDriveToken().then(function(token){
+    var headers=opts.headers||{};
+    headers['Authorization']='Bearer '+token;
+    return fetch(url,{method:opts.method||'GET',headers:headers,body:opts.body});
+  });
+}
+
+// Trova o crea la cartella "allegati CA" (con drive.file vede solo i propri file)
+function ensureDriveFolder(){
+  if(driveFolderId) return Promise.resolve(driveFolderId);
+  var q=encodeURIComponent("name='"+DRIVE_FOLDER_NAME+"' and mimeType='application/vnd.google-apps.folder' and trashed=false");
+  return driveFetch('https://www.googleapis.com/drive/v3/files?q='+q+'&fields=files(id,name)&spaces=drive')
+    .then(function(r){return r.json();})
+    .then(function(data){
+      if(data && data.files && data.files.length){ driveFolderId=data.files[0].id; return driveFolderId; }
+      return driveFetch('https://www.googleapis.com/drive/v3/files?fields=id',{
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({name:DRIVE_FOLDER_NAME, mimeType:'application/vnd.google-apps.folder'})
+      }).then(function(r){return r.json();}).then(function(f){ driveFolderId=f.id; return driveFolderId; });
+    });
+}
+
+// Upload multipart di un File → {id, name, mimeType, size}
+function driveUpload(file){
+  return ensureDriveFolder().then(function(folderId){
+    var metadata={name:file.name, parents:[folderId]};
+    var boundary='gmca'+String(Date.now())+String(Math.floor(Math.random()*1e6));
+    var body=new Blob([
+      '--'+boundary+'\r\n',
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+      JSON.stringify(metadata)+'\r\n',
+      '--'+boundary+'\r\n',
+      'Content-Type: '+(file.type||'application/octet-stream')+'\r\n\r\n',
+      file,
+      '\r\n--'+boundary+'--'
+    ], {type:'multipart/related; boundary='+boundary});
+    return driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,size',{
+      method:'POST', headers:{'Content-Type':'multipart/related; boundary='+boundary}, body:body
+    }).then(function(r){ if(!r.ok) throw new Error('upload_'+r.status); return r.json(); });
+  });
+}
+
+function driveDelete(fileId){
+  return driveFetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId),{method:'DELETE'})
+    .then(function(r){ if(!r.ok && r.status!==404) throw new Error('delete_'+r.status); return true; });
+}
+
+function driveDownload(fileId,fileName){
+  return driveFetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media')
+    .then(function(r){ if(!r.ok) throw new Error('download_'+r.status); return r.blob(); })
+    .then(function(blob){ downloadFile(blob, fileName||'allegato', blob.type||'application/octet-stream'); });
+}
+
+// ── Metadati allegati (Supabase) ─────────────────────────────────────
+function loadAttachmentsForCalls(callIds){
+  attachmentsByCall={};
+  var ids=(callIds||[]).filter(function(x){return x && String(x).indexOf('local_')!==0;});
+  if(!ids.length) return Promise.resolve({});
+  return sbFetch('allegati?chiamata_id=in.('+ids.join(',')+')&order=created_at.asc&select=*')
+    .then(function(r){return r.json();})
+    .then(function(rows){
+      if(!Array.isArray(rows)) return {};
+      rows.forEach(function(a){
+        var k=String(a.chiamata_id);
+        (attachmentsByCall[k]=attachmentsByCall[k]||[]).push(a);
+      });
+      return attachmentsByCall;
+    }).catch(function(){ return {}; });
+}
+
+// Inietta le righe "Allegati" sotto ogni chiamata che ne ha (post-render)
+function injectAttachRows(){
+  var tb=els.tbody||document.getElementById('tbody');
+  if(!tb)return;
+  var old=tb.querySelectorAll('tr.attach-row');
+  for(var i=0;i<old.length;i++){ old[i].parentNode.removeChild(old[i]); }
+  Object.keys(attachmentsByCall).forEach(function(cid){
+    var list=attachmentsByCall[cid]; if(!list||!list.length)return;
+    var row=tb.querySelector('tr[data-row="'+cid+'"]');
+    if(!row)return;
+    var ar=document.createElement('tr');
+    ar.className='attach-row';
+    ar.setAttribute('data-for',cid);
+    ar.innerHTML=
+      '<td colspan="3" class="attach-label">Allegati:</td>'
+     +'<td colspan="2" class="attach-list">'+list.map(attachItemHtml).join('')+'</td>';
+    if(row.nextSibling) row.parentNode.insertBefore(ar,row.nextSibling);
+    else row.parentNode.appendChild(ar);
+  });
+}
+function attachItemHtml(a){
+  return '<span class="attach-item" data-id="'+a.id+'" data-drive="'+esc(a.drive_file_id)+'" data-name="'+esc(a.file_name)+'">'
+    +'<span class="attach-name" title="Scarica '+esc(a.file_name)+'">'
+      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
+      +'<span class="attach-fname">'+esc(a.file_name)+'</span>'
+    +'</span>'
+    +'<span class="attach-del" title="Elimina allegato">'
+      +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>'
+    +'</span>'
+  +'</span>';
+}
+
+// ── Modal upload ─────────────────────────────────────────────────────
+function openAttachModal(callId){
+  if(!isOnline()){ fb(false,'Serve connessione','Gli allegati richiedono internet. Riprova quando torni online.'); return; }
+  if(!driveConfigured()){ fb(false,'Drive non configurato','Manca il Client ID di Google. Contatta l\'amministratore.'); return; }
+  attachModalCallId=callId;
+  var inp=document.getElementById('attachFileInput'); if(inp)inp.value='';
+  var sel=document.getElementById('attachSelectedList'); if(sel)sel.innerHTML='';
+  var prog=document.getElementById('attachProgress'); if(prog){prog.style.display='none';prog.textContent='';}
+  var btn=document.getElementById('btnAttachUpload'); if(btn){btn.disabled=true;}
+  apri('mattach');
+}
+function renderAttachSelected(){
+  var inp=document.getElementById('attachFileInput');
+  var sel=document.getElementById('attachSelectedList');
+  var btn=document.getElementById('btnAttachUpload');
+  if(!inp||!sel)return;
+  var files=inp.files?Array.prototype.slice.call(inp.files):[];
+  if(!files.length){ sel.innerHTML=''; if(btn)btn.disabled=true; return; }
+  sel.innerHTML=files.map(function(f){
+    return '<div class="attach-sel-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>'
+      +'<span class="attach-sel-name">'+esc(f.name)+'</span><span class="attach-sel-size">'+fmtBytes(f.size)+'</span></div>';
+  }).join('');
+  if(btn)btn.disabled=false;
+}
+function fmtBytes(n){
+  n=n||0; if(n<1024)return n+' B';
+  if(n<1048576)return (n/1024).toFixed(0)+' KB';
+  return (n/1048576).toFixed(1)+' MB';
+}
+function doAttachUpload(){
+  var inp=document.getElementById('attachFileInput');
+  var files=inp&&inp.files?Array.prototype.slice.call(inp.files):[];
+  if(!files.length){ return; }
+  if(!isOnline()){ fb(false,'Serve connessione','Impossibile caricare offline.'); return; }
+  var btn=document.getElementById('btnAttachUpload');
+  var cancel=document.getElementById('btnAttachCancel');
+  var prog=document.getElementById('attachProgress');
+  if(btn){btn.disabled=true;btn.innerHTML='<div class="spin"></div> Carico…';}
+  if(cancel)cancel.disabled=true;
+  if(prog){prog.style.display='block';}
+  var callId=attachModalCallId;
+  var done=0, failed=0;
+  var setProg=function(){ if(prog)prog.textContent='Caricati '+done+'/'+files.length+(failed?(' · '+failed+' falliti'):''); };
+  setProg();
+
+  // Sequenziale (un file per volta) per non saturare + progresso chiaro
+  var chain=Promise.resolve();
+  files.forEach(function(file){
+    chain=chain.then(function(){
+      return driveUpload(file).then(function(f){
+        return sbFetch('allegati',{method:'POST',prefer:'return=minimal',body:{
+          chiamata_id:callId, drive_file_id:f.id, file_name:f.name||file.name,
+          mime_type:f.mimeType||file.type||null, size_bytes:f.size?parseInt(f.size,10):(file.size||null),
+          user_id: currentUser?currentUser.id:null
+        }}).then(function(res){
+          if(!res.ok) throw new Error('db_'+res.status);
+          done++; setProg();
+        });
+      }).catch(function(e){
+        failed++; setProg();
+        // se il DB fallisce ma il file è su Drive, non lo perdiamo (resta in Drive);
+        // l'utente può riprovare. Non blocchiamo gli altri file.
+      });
+    });
+  });
+  chain.then(function(){
+    if(btn){btn.disabled=false;btn.innerHTML=svgAttach()+' Carica';}
+    if(cancel)cancel.disabled=false;
+    if(failed===0){
+      chiudi('mattach');
+      fb(true,'Caricato', done+(done===1?' file allegato':' file allegati')+' con successo.');
+    } else {
+      fb(false,'Attenzione', done+' ok, '+failed+' non caricati. Riprova quelli mancanti.');
+    }
+    // Ricarica gli allegati delle chiamate visibili e reinietta le righe
+    loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
+  });
+}
+function getVisibleCallIds(){
+  var tb=els.tbody||document.getElementById('tbody'); if(!tb)return [];
+  var out=[]; tb.querySelectorAll('tr[data-row]').forEach(function(tr){ if(tr.dataset.row)out.push(tr.dataset.row); });
+  return out;
+}
+
+// ── Download ─────────────────────────────────────────────────────────
+function startAttachDownload(driveId,fileName){
+  if(!isOnline()){ fb(false,'Serve connessione','Il download richiede internet.'); return; }
+  fb(true,'Download','Scarico "'+fileName+'"…');
+  driveDownload(driveId,fileName).catch(function(){
+    fb(false,'Errore','Download non riuscito. Riprova.');
+  });
+}
+
+// ── Delete (con conferma) ────────────────────────────────────────────
+function promptAttachDelete(id,driveId,fileName){
+  attachToDelete={ id:id, drive_file_id:driveId, file_name:fileName };
+  var msg=document.getElementById('mattachDelMsg');
+  if(msg)msg.innerHTML='Stai per eliminare <b>'+esc(fileName)+'</b>.<br><br>Verrà rimosso sia da Google Drive sia dall\'elenco. Operazione irreversibile.';
+  apri('mattachDel');
+}
+function doAttachDelete(){
+  if(!attachToDelete)return;
+  if(!isOnline()){ fb(false,'Serve connessione','Impossibile eliminare offline.'); return; }
+  var a=attachToDelete;
+  var btn=document.getElementById('btnAttachDelConfirm');
+  if(btn){btn.disabled=true;btn.innerHTML='<div class="spin"></div> Elimino…';}
+  driveDelete(a.drive_file_id).then(function(){
+    return sbFetch('allegati?id=eq.'+a.id,{method:'DELETE'}).then(function(res){
+      if(!res.ok) throw new Error('db_'+res.status);
+    });
+  }).then(function(){
+    if(btn){btn.disabled=false;btn.innerHTML='Elimina';}
+    chiudi('mattachDel');
+    attachToDelete=null;
+    fb(true,'Eliminato','Allegato rimosso.');
+    loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
+  }).catch(function(){
+    if(btn){btn.disabled=false;btn.innerHTML='Elimina';}
+    fb(false,'Errore','Eliminazione non riuscita. Riprova.');
+  });
+}
+
+function svgAttach(){
+  return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>';
+}
+
+// Wiring modali allegati (chiamato al boot)
+function setupAttachWiring(){
+  var inp=document.getElementById('attachFileInput');
+  if(inp) inp.addEventListener('change', renderAttachSelected);
+  var up=document.getElementById('btnAttachUpload');
+  if(up) up.addEventListener('click', doAttachUpload);
+  var can=document.getElementById('btnAttachCancel');
+  if(can) can.addEventListener('click', function(){ chiudi('mattach'); });
+  var dCan=document.getElementById('btnAttachDelCancel');
+  if(dCan) dCan.addEventListener('click', function(){ chiudi('mattachDel'); attachToDelete=null; });
+  var dOk=document.getElementById('btnAttachDelConfirm');
+  if(dOk) dOk.addEventListener('click', doAttachDelete);
 }
