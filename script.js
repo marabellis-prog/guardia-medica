@@ -4497,7 +4497,12 @@ function relinkifyRow(tr){
       if(nx && nx.nodeType===1 && nx.tagName==='BR') nx.parentNode.removeChild(nx);
       b2.parentNode.removeChild(b2);
     }
+    // innerText preserva gli a-capo (<br>/<div>) solo se il nodo è renderizzato:
+    // attacco il clone fuori schermo, leggo, stacco.
+    clone.style.position='absolute';clone.style.left='-99999px';clone.style.top='0';clone.style.whiteSpace='pre-wrap';
+    document.body.appendChild(clone);
     var raw=clone.innerText||'';
+    if(clone.parentNode)clone.parentNode.removeChild(clone);
     var newBody=linkifyAddresses(linkifyPhones(esc(raw)));
     var newHtml=preservedPrefix+newBody;
     if(newHtml!==cell.innerHTML)cell.innerHTML=newHtml;
