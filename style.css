@@ -687,10 +687,13 @@ tbody tr.local-pending{
 .iho-attach:hover{background:var(--prl);color:var(--pr);border-color:var(--pr);transform:scale(1.05)}
 [data-theme="dark"] .iho-attach:hover{color:var(--pr)}
 
-/* Riga "Allegati" sotto la chiamata */
-tbody tr.attach-row{background:var(--surface2)}
-tbody tr.attach-row:hover{background:var(--surface2)}
-tbody tr.attach-row td{padding:.35rem 1rem .5rem;border-bottom:1px solid var(--div);vertical-align:top}
+/* Riga "Allegati" sotto la chiamata — STESSO sfondo della chiamata a cui appartiene */
+tbody tr.attach-row.attach-pending{background:var(--pend)}
+tbody tr.attach-row.attach-done{background:var(--done)}
+tbody tr.attach-row td{padding:.15rem 1rem .55rem;border-bottom:1px solid var(--div);vertical-align:top;background:transparent}
+/* La chiamata con allegati non chiude col bordo: si fonde con la riga allegati sotto */
+tbody tr.has-attachments{border-bottom:none}
+tbody tr.has-attachments td{padding-bottom:.35rem}
 .attach-label{
   text-align:right;padding-right:10%!important;
   font-weight:700;color:var(--txm);font-size:.82rem;white-space:nowrap;
@@ -739,15 +742,19 @@ tbody tr.attach-row td{padding:.35rem 1rem .5rem;border-bottom:1px solid var(--d
 .attach-sel-size{color:var(--txm);font-size:.78rem;flex-shrink:0}
 .attach-progress{margin-top:.85rem;padding:.6rem .85rem;border-radius:8px;background:var(--prl);color:var(--pr);font-size:.85rem;font-weight:600;text-align:center}
 
-/* Mobile: la riga allegati diventa un blocco sotto la card */
+/* Mobile: la riga allegati è la continuazione della card chiamata (stesso sfondo) */
 @media(max-width:640px){
   .twrap tbody tr.attach-row{
-    display:block;background:var(--surface);
+    display:block;
     border:1px solid var(--bord);border-top:none;
     border-radius:0 0 14px 14px;margin-top:-12px;margin-bottom:2px;
-    padding:8px 12px 10px;box-shadow:var(--sh1);
+    padding:2px 12px 10px;box-shadow:var(--sh1);
   }
-  .twrap tbody tr.attach-row td{display:block;padding:0;border:none}
+  .twrap tbody tr.attach-row.attach-pending{background:var(--pend)}
+  .twrap tbody tr.attach-row.attach-done{background:var(--done);opacity:.8}
+  .twrap tbody tr.attach-row td{display:block;padding:0;border:none;background:transparent}
+  /* La card chiamata con allegati non si arrotonda sotto: si fonde con la riga allegati */
+  .twrap tbody tr.has-attachments{border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom:none}
   .attach-label{text-align:left;padding-right:0!important;margin-bottom:.35rem}
   .attach-fname{max-width:calc(100vw - 120px)}
 }
