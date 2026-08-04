@@ -4576,10 +4576,20 @@ function initDriveTokenClient(){
   });
 }
 
-// Ottiene un access token Drive (cache se valido; altrimenti richiede: silenzioso
-// se già consentito, popup di consenso la prima volta — sempre da user gesture).
+// Ottiene un access token Drive.
+// - Cache in memoria + sessionStorage (riuso su ricarica entro validità ~1h)
+// - requestAccessToken({prompt:''}): consenso SOLO la prima volta, poi silenzioso
+//   (niente più schermata Google ad ogni accesso a un allegato).
 function getDriveToken(){
   if(driveAccessToken && Date.now() < driveTokenExpiry-60000) return Promise.resolve(driveAccessToken);
+  // Riusa un token salvato in sessione (bridge tra le ricariche)
+  try{
+    var cached=JSON.parse(sessionStorage.getItem('driveTok')||'null');
+    if(cached && cached.t && Date.now() < cached.exp-60000){
+      driveAccessToken=cached.t; driveTokenExpiry=cached.exp;
+      return Promise.resolve(driveAccessToken);
+    }
+  }catch(_){}
   if(!driveConfigured()) return Promise.reject(new Error('drive_not_configured'));
   return initDriveTokenClient().then(function(){
     return new Promise(function(resolve,reject){
@@ -4587,11 +4597,13 @@ function getDriveToken(){
         if(resp && resp.access_token){
           driveAccessToken=resp.access_token;
           driveTokenExpiry=Date.now()+((resp.expires_in||3600)*1000);
+          try{ sessionStorage.setItem('driveTok', JSON.stringify({t:driveAccessToken, exp:driveTokenExpiry})); }catch(_){}
           resolve(driveAccessToken);
         } else { reject(new Error((resp&&resp.error)||'no_token')); }
       };
       driveTokenClient.error_callback=function(err){ reject(new Error((err&&err.type)||'popup_error')); };
-      try{ driveTokenClient.requestAccessToken(); }catch(e){ reject(e); }
+      // prompt:'' = mostra il consenso solo se serve (prima volta), poi silenzioso
+      try{ driveTokenClient.requestAccessToken({prompt:''}); }catch(e){ reject(e); }
     });
   });
 }
@@ -4645,10 +4657,9 @@ function driveDelete(fileId){
     .then(function(r){ if(!r.ok && r.status!==404) throw new Error('delete_'+r.status); return true; });
 }
 
-function driveDownload(fileId,fileName){
+function driveGetBlob(fileId){
   return driveFetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?alt=media')
-    .then(function(r){ if(!r.ok) throw new Error('download_'+r.status); return r.blob(); })
-    .then(function(blob){ downloadFile(blob, fileName||'allegato', blob.type||'application/octet-stream'); });
+    .then(function(r){ if(!r.ok) throw new Error('download_'+r.status); return r.blob(); });
 }
 
 // ── Metadati allegati (Supabase) ─────────────────────────────────────
@@ -4790,12 +4801,23 @@ function getVisibleCallIds(){
   return out;
 }
 
-// ── Download ─────────────────────────────────────────────────────────
+// ── Apri allegato in una NUOVA finestra (scaricato da Drive e visualizzato) ──
 function startAttachDownload(driveId,fileName){
-  if(!isOnline()){ fb(false,'Serve connessione','Il download richiede internet.'); return; }
-  fb(true,'Download','Scarico "'+fileName+'"…');
-  driveDownload(driveId,fileName).catch(function(){
-    fb(false,'Errore','Download non riuscito. Riprova.');
+  if(!isOnline()){ fb(false,'Serve connessione','L\'apertura dell\'allegato richiede internet.'); return; }
+  // Apro SUBITO la finestra dentro il gesto del click (evita il blocco popup);
+  // la riempirò col file appena scaricato da Drive.
+  var win=window.open('','_blank');
+  if(win){
+    try{ win.document.write('<!doctype html><meta charset="utf-8"><title>'+esc(fileName||'Allegato')+'</title><body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui,sans-serif;color:#666">Apertura di '+esc(fileName||'allegato')+'…</body>'); }catch(_){}
+  }
+  driveGetBlob(driveId).then(function(blob){
+    var url=URL.createObjectURL(blob);
+    if(win){ try{ win.location.href=url; }catch(_){ window.open(url,'_blank'); } }
+    else { window.open(url,'_blank'); } // fallback se il popup iniziale è stato bloccato
+    setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_){} }, 120000);
+  }).catch(function(){
+    if(win){ try{ win.close(); }catch(_){} }
+    fb(false,'Errore','Apertura non riuscita. Riprova.');
   });
 }
 
