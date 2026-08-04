@@ -4672,18 +4672,24 @@ function loadAttachmentsForCalls(callIds){
 function injectAttachRows(){
   var tb=els.tbody||document.getElementById('tbody');
   if(!tb)return;
+  // Pulisci righe allegati + flag precedenti
   var old=tb.querySelectorAll('tr.attach-row');
   for(var i=0;i<old.length;i++){ old[i].parentNode.removeChild(old[i]); }
+  var prev=tb.querySelectorAll('tr.has-attachments');
+  for(var j=0;j<prev.length;j++){ prev[j].classList.remove('has-attachments'); }
   Object.keys(attachmentsByCall).forEach(function(cid){
     var list=attachmentsByCall[cid]; if(!list||!list.length)return;
     var row=tb.querySelector('tr[data-row="'+cid+'"]');
     if(!row)return;
     var ar=document.createElement('tr');
-    ar.className='attach-row';
+    // Stesso sfondo della chiamata (pending giallo / done bianco): fa parte della stessa chiamata
+    var stateClass=row.classList.contains('done')?'attach-done':'attach-pending';
+    ar.className='attach-row '+stateClass;
     ar.setAttribute('data-for',cid);
     ar.innerHTML=
       '<td colspan="3" class="attach-label">Allegati:</td>'
      +'<td colspan="2" class="attach-list">'+list.map(attachItemHtml).join('')+'</td>';
+    row.classList.add('has-attachments'); // toglie il bordo inferiore → si fonde con la riga allegati
     if(row.nextSibling) row.parentNode.insertBefore(ar,row.nextSibling);
     else row.parentNode.appendChild(ar);
   });
