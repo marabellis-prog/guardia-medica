@@ -4577,14 +4577,16 @@ function initDriveTokenClient(){
 }
 
 // Ottiene un access token Drive.
-// - Cache in memoria + sessionStorage (riuso su ricarica entro validità ~1h)
-// - requestAccessToken({prompt:''}): consenso SOLO la prima volta, poi silenzioso
-//   (niente più schermata Google ad ogni accesso a un allegato).
+// - Cache in memoria + localStorage: il token (valido ~1h) viene RIUSATO tra ricariche
+//   e riaperture dell'app → niente più richiesta di accesso "ogni volta".
+// - requestAccessToken() SENZA override prompt: Google mostra il consenso solo quando
+//   serve davvero (token mancante/scaduto), non ad ogni operazione. (NB: prompt:'' con
+//   GIS fallisce senza UI se non c'è già un consenso → per questo non si usa.)
+var DRIVE_TOK_KEY='driveTok_v1';
 function getDriveToken(){
   if(driveAccessToken && Date.now() < driveTokenExpiry-60000) return Promise.resolve(driveAccessToken);
-  // Riusa un token salvato in sessione (bridge tra le ricariche)
   try{
-    var cached=JSON.parse(sessionStorage.getItem('driveTok')||'null');
+    var cached=JSON.parse(localStorage.getItem(DRIVE_TOK_KEY)||'null');
     if(cached && cached.t && Date.now() < cached.exp-60000){
       driveAccessToken=cached.t; driveTokenExpiry=cached.exp;
       return Promise.resolve(driveAccessToken);
@@ -4597,23 +4599,36 @@ function getDriveToken(){
         if(resp && resp.access_token){
           driveAccessToken=resp.access_token;
           driveTokenExpiry=Date.now()+((resp.expires_in||3600)*1000);
-          try{ sessionStorage.setItem('driveTok', JSON.stringify({t:driveAccessToken, exp:driveTokenExpiry})); }catch(_){}
+          try{ localStorage.setItem(DRIVE_TOK_KEY, JSON.stringify({t:driveAccessToken, exp:driveTokenExpiry})); }catch(_){}
           resolve(driveAccessToken);
         } else { reject(new Error((resp&&resp.error)||'no_token')); }
       };
       driveTokenClient.error_callback=function(err){ reject(new Error((err&&err.type)||'popup_error')); };
-      // prompt:'' = mostra il consenso solo se serve (prima volta), poi silenzioso
-      try{ driveTokenClient.requestAccessToken({prompt:''}); }catch(e){ reject(e); }
+      try{ driveTokenClient.requestAccessToken(); }catch(e){ reject(e); }
     });
   });
+}
+// Invalida il token in cache (usato su 401 dal server Drive)
+function clearDriveToken(){
+  driveAccessToken=null; driveTokenExpiry=0;
+  try{ localStorage.removeItem(DRIVE_TOK_KEY); }catch(_){}
 }
 
 function driveFetch(url,opts){
   opts=opts||{};
-  return getDriveToken().then(function(token){
-    var headers=opts.headers||{};
+  var doIt=function(token){
+    var headers={};
+    if(opts.headers){ for(var k in opts.headers){ if(opts.headers.hasOwnProperty(k)) headers[k]=opts.headers[k]; } }
     headers['Authorization']='Bearer '+token;
     return fetch(url,{method:opts.method||'GET',headers:headers,body:opts.body});
+  };
+  return getDriveToken().then(doIt).then(function(r){
+    // Token scaduto/revocato → invalida cache e riprova UNA volta con token fresco
+    if(r.status===401){
+      clearDriveToken();
+      return getDriveToken().then(doIt);
+    }
+    return r;
   });
 }
 
@@ -4815,9 +4830,14 @@ function startAttachDownload(driveId,fileName){
     if(win){ try{ win.location.href=url; }catch(_){ window.open(url,'_blank'); } }
     else { window.open(url,'_blank'); } // fallback se il popup iniziale è stato bloccato
     setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_){} }, 120000);
-  }).catch(function(){
+  }).catch(function(e){
     if(win){ try{ win.close(); }catch(_){} }
-    fb(false,'Errore','Apertura non riuscita. Riprova.');
+    var em=(e&&e.message)||'';
+    var msg='Apertura non riuscita. Riprova.';
+    if(em.indexOf('404')!==-1) msg='File non trovato su Drive (forse spostato o eliminato dalla cartella "allegati CA").';
+    else if(em.indexOf('403')!==-1) msg='Google Drive ha negato l\'accesso al file. Riprova ad autorizzare Drive.';
+    else if(em.indexOf('popup')!==-1||em.indexOf('token')!==-1||em.indexOf('no_token')!==-1) msg='Non sono riuscito ad autorizzare Google Drive. Riprova (consenti l\'accesso quando richiesto).';
+    fb(false,'Errore', msg);
   });
 }
 
