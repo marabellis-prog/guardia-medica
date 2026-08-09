@@ -869,8 +869,16 @@
       </label>
       <div id="mailSelectedList" class="attach-sel-list"></div>
       <div id="mailNoCallNote" class="mail-note" style="display:none">Gli allegati verranno inviati per mail ma non salvati nella chiamata (chiamata non ancora sincronizzata).</div>
-      <div id="mailProgress" class="attach-progress" style="display:none"></div>
       <div id="mailErr" class="mail-err" style="display:none"></div>
+    </div>
+
+    <!-- Velo di attesa: copre il modal durante l'invio -->
+    <div class="mail-loading" id="mailLoading" style="display:none">
+      <div class="mail-loading-inner">
+        <div class="mail-spin"></div>
+        <div class="mail-loading-text" id="mailLoadingText">Invio in corso…</div>
+        <div class="mail-loading-sub">Non chiudere la finestra</div>
+      </div>
     </div>
 
     <div class="mac mail-foot">
