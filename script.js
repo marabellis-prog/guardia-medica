@@ -5239,6 +5239,17 @@ function attachItemHtml(a){
   +'</span>';
 }
 
+// Velo di attesa su un modal qualsiasi: mostra lo stato in modo evidente e
+// blocca i pulsanti, così non si chiude la finestra a metà operazione.
+function setModalBusy(modalId, attivo, testo){
+  var m=document.getElementById(modalId); if(!m)return;
+  var ov=m.querySelector('.mbox-loading');
+  var tx=m.querySelector('.mbox-loading-text');
+  if(tx&&testo) tx.textContent=testo;
+  if(ov) ov.style.display = attivo ? 'flex' : 'none';
+  m.querySelectorAll('button').forEach(function(b){ b.disabled=attivo; });
+}
+
 // ── Modal upload ─────────────────────────────────────────────────────
 function openAttachModal(callId){
   if(!isOnline()){ fb(false,'Serve connessione','Gli allegati richiedono internet. Riprova quando torni online.'); return; }
@@ -5246,8 +5257,8 @@ function openAttachModal(callId){
   attachModalCallId=callId;
   var inp=document.getElementById('attachFileInput'); if(inp)inp.value='';
   var sel=document.getElementById('attachSelectedList'); if(sel)sel.innerHTML='';
-  var prog=document.getElementById('attachProgress'); if(prog){prog.style.display='none';prog.textContent='';}
-  var btn=document.getElementById('btnAttachUpload'); if(btn){btn.disabled=true;}
+  setModalBusy('mattach', false);                       // ripristina stato pulito
+  var btn=document.getElementById('btnAttachUpload'); if(btn){btn.disabled=true;} // finché non scegli i file
   apri('mattach');
 }
 function renderAttachSelected(){
@@ -5273,16 +5284,14 @@ function doAttachUpload(){
   var files=inp&&inp.files?Array.prototype.slice.call(inp.files):[];
   if(!files.length){ return; }
   if(!isOnline()){ fb(false,'Serve connessione','Impossibile caricare offline.'); return; }
-  var btn=document.getElementById('btnAttachUpload');
-  var cancel=document.getElementById('btnAttachCancel');
-  var prog=document.getElementById('attachProgress');
-  if(btn){btn.disabled=true;btn.innerHTML='<div class="spin"></div> Carico…';}
-  if(cancel)cancel.disabled=true;
-  if(prog){prog.style.display='block';}
   var callId=attachModalCallId;
   var done=0, failed=0;
-  var setProg=function(){ if(prog)prog.textContent='Caricati '+done+'/'+files.length+(failed?(' · '+failed+' falliti'):''); };
-  setProg();
+  var setProg=function(){
+    setModalBusy('mattach', true,
+      'Caricamento '+(done+failed+1>files.length?files.length:done+failed+1)+' di '+files.length+'…'
+      +(failed?('\n'+failed+' non riuscit'+(failed===1?'o':'i')):''));
+  };
+  setModalBusy('mattach', true, files.length===1?'Caricamento del file…':('Caricamento di '+files.length+' file…'));
 
   // Sequenziale (un file per volta) per non saturare + progresso chiaro
   var chain=Promise.resolve();
@@ -5305,8 +5314,7 @@ function doAttachUpload(){
     });
   });
   chain.then(function(){
-    if(btn){btn.disabled=false;btn.innerHTML=svgAttach()+' Carica';}
-    if(cancel)cancel.disabled=false;
+    setModalBusy('mattach', false);
     if(failed===0){
       chiudi('mattach');
       fb(true,'Caricato', done+(done===1?' file allegato':' file allegati')+' con successo.');
@@ -5353,26 +5361,27 @@ function promptAttachDelete(id,driveId,fileName){
   attachToDelete={ id:id, drive_file_id:driveId, file_name:fileName };
   var msg=document.getElementById('mattachDelMsg');
   if(msg)msg.innerHTML='Stai per eliminare <b>'+esc(fileName)+'</b>.<br><br>Verrà rimosso sia da Google Drive sia dall\'elenco. Operazione irreversibile.';
+  setModalBusy('mattachDel', false);   // ripristina stato pulito
   apri('mattachDel');
 }
 function doAttachDelete(){
   if(!attachToDelete)return;
   if(!isOnline()){ fb(false,'Serve connessione','Impossibile eliminare offline.'); return; }
   var a=attachToDelete;
-  var btn=document.getElementById('btnAttachDelConfirm');
-  if(btn){btn.disabled=true;btn.innerHTML='<div class="spin"></div> Elimino…';}
+  setModalBusy('mattachDel', true, 'Elimino da Google Drive…');
   driveDelete(a.drive_file_id).then(function(){
+    setModalBusy('mattachDel', true, 'Aggiorno l\'elenco allegati…');
     return sbFetch('allegati?id=eq.'+a.id,{method:'DELETE'}).then(function(res){
       if(!res.ok) throw new Error('db_'+res.status);
     });
   }).then(function(){
-    if(btn){btn.disabled=false;btn.innerHTML='Elimina';}
+    setModalBusy('mattachDel', false);
     chiudi('mattachDel');
     attachToDelete=null;
     fb(true,'Eliminato','Allegato rimosso.');
     loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
   }).catch(function(){
-    if(btn){btn.disabled=false;btn.innerHTML='Elimina';}
+    setModalBusy('mattachDel', false);
     fb(false,'Errore','Eliminazione non riuscita. Riprova.');
   });
 }
@@ -5448,11 +5457,7 @@ function openMailModal(email, callId){
   var fi=document.getElementById('mailFileInput');if(fi)fi.value='';
   var sl=document.getElementById('mailSelectedList'); if(sl)sl.innerHTML='';
   var er=document.getElementById('mailErr');      if(er){er.style.display='none';er.textContent='';}
-  // Ripristina lo stato: velo nascosto e pulsanti attivi
-  var ov=document.getElementById('mailLoading');  if(ov)ov.style.display='none';
-  ['btnMailSend','btnMailCancel','btnMailClose'].forEach(function(id){
-    var b=document.getElementById(id); if(b)b.disabled=false;
-  });
+  setModalBusy('mmail', false);   // ripristina: velo nascosto, pulsanti attivi
   var nb=document.getElementById('mailNoCallNote');
   if(nb) nb.style.display = callId ? 'none' : 'block';
   apri('mmail');
@@ -5519,20 +5524,8 @@ function doSendMail(){
   if(tot>MAIL_MAX_TOTAL_BYTES){ mailShowErr('Allegati troppo pesanti ('+fmtBytes(tot)+'). Massimo '+fmtBytes(MAIL_MAX_TOTAL_BYTES)+'.'); return; }
 
   var er=document.getElementById('mailErr'); if(er)er.style.display='none';
-  var btn=document.getElementById('btnMailSend');
-  var can=document.getElementById('btnMailCancel');
-  var cls=document.getElementById('btnMailClose');
-
   // Velo di attesa sul modal: molto più visibile dello spinner nel pulsante
-  var setBusy=function(attivo,testo){
-    var ov=document.getElementById('mailLoading');
-    var tx=document.getElementById('mailLoadingText');
-    if(tx&&testo) tx.textContent=testo;
-    if(ov) ov.style.display = attivo ? 'flex' : 'none';
-    if(btn) btn.disabled=attivo;
-    if(can) can.disabled=attivo;
-    if(cls) cls.disabled=attivo;
-  };
+  var setBusy=function(attivo,testo){ setModalBusy('mmail', attivo, testo); };
   setBusy(true, files.length?('Preparo '+files.length+(files.length===1?' allegato…':' allegati…')):'Invio in corso…');
 
   // 1. Converte gli allegati in base64 per la mail
