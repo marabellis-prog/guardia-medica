@@ -5448,7 +5448,11 @@ function openMailModal(email, callId){
   var fi=document.getElementById('mailFileInput');if(fi)fi.value='';
   var sl=document.getElementById('mailSelectedList'); if(sl)sl.innerHTML='';
   var er=document.getElementById('mailErr');      if(er){er.style.display='none';er.textContent='';}
-  var pr=document.getElementById('mailProgress'); if(pr){pr.style.display='none';pr.textContent='';}
+  // Ripristina lo stato: velo nascosto e pulsanti attivi
+  var ov=document.getElementById('mailLoading');  if(ov)ov.style.display='none';
+  ['btnMailSend','btnMailCancel','btnMailClose'].forEach(function(id){
+    var b=document.getElementById(id); if(b)b.disabled=false;
+  });
   var nb=document.getElementById('mailNoCallNote');
   if(nb) nb.style.display = callId ? 'none' : 'block';
   apri('mmail');
@@ -5517,16 +5521,25 @@ function doSendMail(){
   var er=document.getElementById('mailErr'); if(er)er.style.display='none';
   var btn=document.getElementById('btnMailSend');
   var can=document.getElementById('btnMailCancel');
-  var pr=document.getElementById('mailProgress');
-  if(btn){ btn.disabled=true; btn.innerHTML='<div class="spin"></div> Invio…'; }
-  if(can) can.disabled=true;
-  if(pr){ pr.style.display='block'; pr.textContent=files.length?'Preparo gli allegati…':'Invio in corso…'; }
+  var cls=document.getElementById('btnMailClose');
+
+  // Velo di attesa sul modal: molto più visibile dello spinner nel pulsante
+  var setBusy=function(attivo,testo){
+    var ov=document.getElementById('mailLoading');
+    var tx=document.getElementById('mailLoadingText');
+    if(tx&&testo) tx.textContent=testo;
+    if(ov) ov.style.display = attivo ? 'flex' : 'none';
+    if(btn) btn.disabled=attivo;
+    if(can) can.disabled=attivo;
+    if(cls) cls.disabled=attivo;
+  };
+  setBusy(true, files.length?('Preparo '+files.length+(files.length===1?' allegato…':' allegati…')):'Invio in corso…');
 
   // 1. Converte gli allegati in base64 per la mail
   Promise.all(files.map(function(f){
     return fileToBase64(f).then(function(b64){ return {name:f.name, content:b64, _file:f}; });
   })).then(function(atts){
-    if(pr) pr.textContent='Invio della mail…';
+    setBusy(true,'Invio della mail in corso…');
     // 2. Invia tramite Edge Function (la chiave del servizio resta lato server)
     return fetch(SUPABASE_URL+'/functions/v1/send-mail',{
       method:'POST',
@@ -5549,7 +5562,7 @@ function doSendMail(){
   }).then(function(atts){
     // 3. Mail partita: salva gli allegati anche su Drive/chiamata (best effort)
     if(!atts.length || !mailModalCallId) return null;
-    if(pr) pr.textContent='Salvo gli allegati nella chiamata…';
+    setBusy(true,'Mail inviata. Salvo gli allegati nella chiamata…');
     var chain=Promise.resolve();
     atts.forEach(function(a){
       chain=chain.then(function(){
@@ -5568,9 +5581,7 @@ function doSendMail(){
     // 4. Traccia nelle note della chiamata
     return appendMailNote(mailModalCallId, to);
   }).then(function(){
-    if(btn){ btn.disabled=false; btn.innerHTML=svgMailSend()+' Invia'; }
-    if(can) can.disabled=false;
-    if(pr) pr.style.display='none';
+    setBusy(false);
     chiudi('mmail');
     var quota='';
     if(lastMailRemaining!==null){
@@ -5581,9 +5592,7 @@ function doSendMail(){
     fb(true,'Mail inviata','Messaggio inviato a '+to+(files.length?(' con '+files.length+(files.length===1?' allegato':' allegati')):'')+'.'+quota);
     loadRows(PAGE);
   }).catch(function(e){
-    if(btn){ btn.disabled=false; btn.innerHTML=svgMailSend()+' Invia'; }
-    if(can) can.disabled=false;
-    if(pr) pr.style.display='none';
+    setBusy(false);
     var em=String((e&&e.message)||'');
     var msg='Invio non riuscito. Riprova.';
     if(em.indexOf('not_configured')!==-1) msg='Il servizio di posta non è ancora configurato. Contatta l\'amministratore.';
@@ -5595,9 +5604,6 @@ function doSendMail(){
   });
 }
 
-function svgMailSend(){
-  return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round" style="vertical-align:-2px;margin-right:4px"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>';
-}
 
 function setupMailWiring(){
   // Modal di scelta (copia / invia)
