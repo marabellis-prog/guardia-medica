@@ -789,6 +789,30 @@
   </div>
 </div>
 
+<!-- Modal scelta azione su indirizzo email -->
+<div class="mov" id="mmailChoice">
+  <div class="mbox">
+    <div class="mic ok">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+    </div>
+    <div class="mtit">Indirizzo email</div>
+    <div class="mphone-num-area">
+      <div class="mail-addr-view" id="mailChoiceAddr"></div>
+    </div>
+    <div class="mac" style="margin-top:1.25rem;flex-wrap:wrap">
+      <button class="bcan" id="btnMailChoiceCancel" type="button">Annulla</button>
+      <button class="bconf2" id="btnMailChoiceCopy" type="button" title="Copia l'indirizzo negli appunti" style="display:flex;align-items:center;gap:.35rem">
+        <svg id="mailCopyIco" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span id="mailCopyLabel">Copia indirizzo</span>
+      </button>
+      <button class="bconf" id="btnMailChoiceSend" type="button">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><path d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+        Invia mail
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal invio mail al paziente -->
 <div class="mov" id="mmail">
   <div class="mbox mail-box">
