@@ -778,13 +778,20 @@
       <input type="file" id="attachFileInput" multiple style="display:none">
     </label>
     <div id="attachSelectedList" class="attach-sel-list"></div>
-    <div id="attachProgress" class="attach-progress" style="display:none"></div>
     <div class="mac" style="margin-top:1.1rem">
       <button class="bcan" id="btnAttachCancel" type="button">Annulla</button>
       <button class="bconf" id="btnAttachUpload" type="button" disabled>
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
         Carica
       </button>
+    </div>
+
+    <div class="mbox-loading" style="display:none">
+      <div class="mbox-loading-inner">
+        <div class="mbox-spin"></div>
+        <div class="mbox-loading-text">Caricamento in corso…</div>
+        <div class="mbox-loading-sub">Non chiudere la finestra</div>
+      </div>
     </div>
   </div>
 </div>
@@ -873,11 +880,11 @@
     </div>
 
     <!-- Velo di attesa: copre il modal durante l'invio -->
-    <div class="mail-loading" id="mailLoading" style="display:none">
-      <div class="mail-loading-inner">
-        <div class="mail-spin"></div>
-        <div class="mail-loading-text" id="mailLoadingText">Invio in corso…</div>
-        <div class="mail-loading-sub">Non chiudere la finestra</div>
+    <div class="mbox-loading" style="display:none">
+      <div class="mbox-loading-inner">
+        <div class="mbox-spin"></div>
+        <div class="mbox-loading-text">Invio in corso…</div>
+        <div class="mbox-loading-sub">Non chiudere la finestra</div>
       </div>
     </div>
 
@@ -902,6 +909,14 @@
     <div class="mac">
       <button class="bcan" id="btnAttachDelCancel" type="button">Annulla</button>
       <button class="bconf" id="btnAttachDelConfirm" type="button" style="background:var(--er);color:#fff">Elimina</button>
+    </div>
+
+    <div class="mbox-loading" style="display:none">
+      <div class="mbox-loading-inner">
+        <div class="mbox-spin"></div>
+        <div class="mbox-loading-text">Eliminazione in corso…</div>
+        <div class="mbox-loading-sub">Non chiudere la finestra</div>
+      </div>
     </div>
   </div>
 </div>
