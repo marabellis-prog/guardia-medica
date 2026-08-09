@@ -2396,7 +2396,7 @@ function setupTableDelegation(){
       }
       var trMail=mailEl.closest('tr');
       var mailCallId=(trMail&&trMail.dataset.row)?parseInt(trMail.dataset.row):null;
-      openMailModal(mailEl.dataset.mail||mailEl.textContent, mailCallId);
+      openMailChoice(mailEl.dataset.mail||mailEl.textContent, mailCallId);
       return;
     }
     var attBtn=t.closest('.iho-attach');
@@ -3349,6 +3349,7 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mattach'))chiudi('mattach');
   if(e.target===document.getElementById('mattachDel')){chiudi('mattachDel');attachToDelete=null;}
   if(e.target===document.getElementById('mmail'))chiudi('mmail');
+  if(e.target===document.getElementById('mmailChoice'))chiudi('mmailChoice');
 });
 
 
@@ -4933,6 +4934,45 @@ function svgAttach(){
 // ═══════════════════════════════════════════════════════════════════
 var MAIL_MAX_TOTAL_BYTES=9*1024*1024; // limite prudenziale allegati mail (~9 MB)
 var mailModalCallId=null;
+var mailChoiceAddr='', mailChoiceCallId=null;
+
+// Click su un'email → prima si sceglie: copia negli appunti oppure invia mail
+function openMailChoice(email, callId){
+  mailChoiceAddr=(email||'').trim();
+  mailChoiceCallId=callId||null;
+  var v=document.getElementById('mailChoiceAddr');
+  if(v)v.textContent=mailChoiceAddr;
+  // Ripristina il bottone Copia (se era rimasto su "Copiato!")
+  var lbl=document.getElementById('mailCopyLabel');
+  var btn=document.getElementById('btnMailChoiceCopy');
+  if(lbl)lbl.textContent='Copia indirizzo';
+  if(btn){ btn.style.color=''; btn.style.borderColor=''; }
+  apri('mmailChoice');
+}
+
+function copyMailAddress(){
+  var addr=mailChoiceAddr;
+  if(!addr)return;
+  copyToClipboard(addr).then(function(ok){
+    var lbl=document.getElementById('mailCopyLabel');
+    var ico=document.getElementById('mailCopyIco');
+    var btn=document.getElementById('btnMailChoiceCopy');
+    if(ok && lbl && ico){
+      var origIco=ico.innerHTML;
+      lbl.textContent='Copiato!';
+      ico.innerHTML='<polyline points="20 6 9 17 4 12"/>';
+      if(btn){ btn.style.color='var(--ok)'; btn.style.borderColor='var(--ok)'; }
+      setTimeout(function(){
+        chiudi('mmailChoice');
+        lbl.textContent='Copia indirizzo';
+        ico.innerHTML=origIco;
+        if(btn){ btn.style.color=''; btn.style.borderColor=''; }
+      },900);
+    } else if(!ok){
+      fb(false,'Copia fallita','Il browser ha bloccato la copia automatica.');
+    }
+  });
+}
 
 function openMailModal(email, callId){
   mailModalCallId=callId||null;
@@ -5087,6 +5127,17 @@ function svgMailSend(){
 }
 
 function setupMailWiring(){
+  // Modal di scelta (copia / invia)
+  var cCan=document.getElementById('btnMailChoiceCancel');
+  if(cCan) cCan.addEventListener('click', function(){ chiudi('mmailChoice'); });
+  var cCopy=document.getElementById('btnMailChoiceCopy');
+  if(cCopy) cCopy.addEventListener('click', copyMailAddress);
+  var cSend=document.getElementById('btnMailChoiceSend');
+  if(cSend) cSend.addEventListener('click', function(){
+    chiudi('mmailChoice');
+    openMailModal(mailChoiceAddr, mailChoiceCallId);
+  });
+
   var fi=document.getElementById('mailFileInput');
   if(fi) fi.addEventListener('change', renderMailSelected);
   var send=document.getElementById('btnMailSend');
