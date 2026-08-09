@@ -1683,6 +1683,8 @@ function attachFormDateListeners(){
 function salva(){
   var d=sanitizeText(document.getElementById('txd').value.trim());
   var n=sanitizeText(document.getElementById('txn').value.trim());
+  // CAP dei comuni serviti: inserito subito, senza rete (vedi CAP_COMUNI)
+  d=addCapsLocalSync(d);
   var p=document.getElementById('selPost').value;
   var ee=document.getElementById('errd'),te=document.getElementById('txd');
   var sp=document.getElementById('selPost');
@@ -1735,6 +1737,8 @@ function salva(){
   var finalize=function(sent){
     btn.disabled=false;btn.innerHTML=svgSave()+' Salva';
     if(sent){
+      // CAP non risolvibili dalla tabella (es. vie di Roma): ricerca online in background
+      enrichNewCallCap(clientUuid, d);
       fb(true,'Salvata','Chiamata salvata sul server.');
     } else {
       fb(true,'Salvata in locale','Connessione assente: la chiamata è al sicuro sul dispositivo e verrà inviata automaticamente appena torna la linea. Puoi anche chiudere l\'app: NON perderai i dati.');
@@ -3796,6 +3800,199 @@ function computeAddressEnd(text){
   var sent=sub.search(/\.\s+[A-ZÀ-Ü]/);
   if(sent>5)idx=sent;
   return idx;
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CAP AUTOMATICO
+// Livello 1 — tabella locale dei comuni serviti (CAP UNICO per comune,
+//   verificato su fonte postale): certezza assoluta, istantaneo, offline.
+// Livello 2 — ricerca su OpenStreetMap per gli altri comuni (es. Roma, dove
+//   il CAP cambia via per via). Scrive SOLO se:
+//     a) la ricerca è vincolata all'area operativa (niente omonimie lontane)
+//     b) tutti i risultati concordano sullo stesso CAP
+//     c) la via trovata corrisponde davvero a quella scritta
+//   Se anche una sola condizione non regge → non scrive nulla.
+// NB: per i piccoli comuni della Sabina OSM restituisce CAP errati
+//     (es. Sant'Angelo Romano→00018 invece di 00010): per questo la
+//     tabella locale ha SEMPRE la precedenza.
+// ═══════════════════════════════════════════════════════════════════
+var CAP_COMUNI={
+  // Guidonia Montecelio e sue frazioni
+  'guidonia montecelio':'00012','guidonia':'00012','montecelio':'00012',
+  'villalba':'00012','villanova':'00012','setteville':'00012',
+  'colleverde':'00012','colle verde':'00012','albuccione':'00012','la botte':'00012',
+  // Comuni della Sabina serviti dalla postazione di Palombara
+  'palombara sabina':'00018','palombara':'00018',
+  'marcellina':'00010','monteflavio':'00010','montelibretti':'00010',
+  'montorio romano':'00010','moricone':'00010',
+  "sant'angelo romano":'00010','sant angelo romano':'00010','santangelo romano':'00010',
+  'nerola':'00017',
+  // Comuni limitrofi frequenti
+  'mentana':'00013','fonte nuova':'00013'
+};
+// Riquadro dell'area operativa (lon1,lat1,lon2,lat2): Roma + Sabina
+var CAP_VIEWBOX='12.20,41.60,13.20,42.30';
+var CAP_CACHE_KEY='capCache_v1';
+
+function hasCap(s){ return /\b\d{5}\b/.test(s||''); }
+
+// Individua gli indirizzi nel testo GREZZO (stessa logica dei link)
+function findAddressesInText(text){
+  var re=new RegExp('\\b'+ADDR_TOPONIMI+'\\.?[\\s.]+\\w[^;\\n]{0,200}','gi');
+  var out=[],m;
+  while((m=re.exec(text))!==null){
+    var end=computeAddressEnd(m[0]);
+    var clean=m[0].substring(0,end).replace(/[\s.]+$/,'').trim();
+    if(clean.length>=6) out.push({start:m.index, end:m.index+clean.length, text:clean});
+  }
+  return out;
+}
+
+// Livello 1: comune riconosciuto in tabella (vince il nome più lungo, così
+// "villanova di guidonia" non viene scambiato per "guidonia")
+function capFromTable(addrText){
+  var t=' '+String(addrText||'').toLowerCase()+' ';
+  var best=null,bestLen=0;
+  for(var k in CAP_COMUNI){
+    if(!CAP_COMUNI.hasOwnProperty(k))continue;
+    if(t.indexOf(k)!==-1 && k.length>bestLen){ best=CAP_COMUNI[k]; bestLen=k.length; }
+  }
+  return best;
+}
+
+// Normalizza un nome di via per il confronto (toglie toponimo, accenti, punteggiatura)
+function normRoad(s){
+  return String(s||'').toLowerCase()
+    .replace(/[àáâä]/g,'a').replace(/[èéêë]/g,'e').replace(/[ìíîï]/g,'i')
+    .replace(/[òóôö]/g,'o').replace(/[ùúûü]/g,'u')
+    .replace(new RegExp('^\\s*'+ADDR_TOPONIMI+'\\.?\\s+','i'),'')
+    .replace(/[^a-z0-9 ]/g,' ').replace(/\s+/g,' ').trim();
+}
+// La via trovata deve corrispondere a quella scritta (evita falsi positivi:
+// es. cercando "via Roma, Nerola" OSM propone "Strada Statale 4 Via Salaria")
+function roadMatches(typed,found){
+  var a=normRoad(typed.replace(/\d+.*$/,'')), b=normRoad(found);
+  if(!a||!b)return false;
+  if(a.indexOf(b)!==-1||b.indexOf(a)!==-1)return true;
+  var ta=a.split(' ').filter(function(w){return w.length>3;});
+  if(!ta.length)return false;
+  return ta.every(function(w){ return b.indexOf(w)!==-1; });
+}
+
+function capCacheGet(key){
+  try{
+    var c=JSON.parse(localStorage.getItem(CAP_CACHE_KEY)||'{}');
+    var e=c[key];
+    if(e && (Date.now()-e.ts)<90*86400000) return e.v; // 90 giorni
+  }catch(_){}
+  return undefined;
+}
+function capCacheSet(key,val){
+  try{
+    var c=JSON.parse(localStorage.getItem(CAP_CACHE_KEY)||'{}');
+    c[key]={v:val,ts:Date.now()};
+    var keys=Object.keys(c);
+    if(keys.length>300){ delete c[keys[0]]; }
+    localStorage.setItem(CAP_CACHE_KEY,JSON.stringify(c));
+  }catch(_){}
+}
+
+// Livello 2: ricerca online vincolata + tripla verifica
+function capFromOnline(addrText){
+  var key=String(addrText||'').toLowerCase().replace(/\s+/g,' ').trim();
+  var cached=capCacheGet(key);
+  if(cached!==undefined) return Promise.resolve(cached);
+  if(!isOnline()) return Promise.resolve(null);
+  var url='https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=it&limit=5'
+        + '&viewbox='+CAP_VIEWBOX+'&bounded=1&q='+encodeURIComponent(addrText);
+  return fetch(url,{headers:{'Accept':'application/json'}})
+    .then(function(r){ return r.ok?r.json():null; })
+    .then(function(list){
+      var val=null;
+      if(Array.isArray(list)&&list.length){
+        var pcs=[];
+        list.forEach(function(x){
+          var pc=x&&x.address&&x.address.postcode;
+          if(pc&&pcs.indexOf(pc)===-1)pcs.push(pc);
+        });
+        // (b) tutti i risultati devono concordare
+        if(pcs.length===1){
+          // (c) la via trovata deve corrispondere a quella scritta
+          var ok=list.some(function(x){ return x&&x.address&&roadMatches(addrText, x.address.road); });
+          if(ok) val=pcs[0];
+        }
+      }
+      capCacheSet(key,val);
+      return val;
+    }).catch(function(){ return null; });
+}
+
+// Aggiunge i CAP mancanti nel testo. Ritorna Promise<{text, changed}>.
+// onlineAllowed=false → usa solo la tabella locale (istantaneo, offline)
+function addMissingCaps(text, onlineAllowed){
+  var addrs=findAddressesInText(text||'');
+  if(!addrs.length) return Promise.resolve({text:text, changed:false});
+  var todo=addrs.filter(function(a){ return !hasCap(a.text); });
+  if(!todo.length) return Promise.resolve({text:text, changed:false});
+
+  return Promise.all(todo.map(function(a){
+    var local=capFromTable(a.text);
+    if(local) return Promise.resolve({a:a, cap:local});
+    if(!onlineAllowed) return Promise.resolve({a:a, cap:null});
+    return capFromOnline(a.text).then(function(cap){ return {a:a, cap:cap}; });
+  })).then(function(res){
+    var found=res.filter(function(x){ return !!x.cap; });
+    if(!found.length) return {text:text, changed:false};
+    // Inserisce dal fondo all'inizio per non invalidare le posizioni
+    found.sort(function(x,y){ return y.a.end - x.a.end; });
+    var out=text;
+    found.forEach(function(x){
+      out = out.slice(0, x.a.end) + ' ' + x.cap + out.slice(x.a.end);
+    });
+    return {text:out, changed:true};
+  });
+}
+
+// Variante SINCRONA solo-tabella: nessuna rete, usabile prima del salvataggio
+// (così il CAP dei comuni serviti c'è subito, anche senza linea)
+function addCapsLocalSync(text){
+  var addrs=findAddressesInText(text||'');
+  var found=[];
+  addrs.forEach(function(a){
+    if(hasCap(a.text))return;
+    var cap=capFromTable(a.text);
+    if(cap)found.push({a:a,cap:cap});
+  });
+  if(!found.length)return text;
+  found.sort(function(x,y){ return y.a.end - x.a.end; });
+  var out=text;
+  found.forEach(function(x){ out = out.slice(0,x.a.end)+' '+x.cap+out.slice(x.a.end); });
+  return out;
+}
+
+// Completa via rete i CAP di una chiamata appena salvata (identificata dal client_uuid)
+function enrichNewCallCap(clientUuid, text){
+  if(!isOnline())return;
+  var rimasti=findAddressesInText(text||'').filter(function(a){ return !hasCap(a.text); });
+  if(!rimasti.length)return;
+  sbFetch('chiamate?client_uuid=eq.'+encodeURIComponent(clientUuid)+'&select=id,descrizione')
+    .then(function(r){ return r.json(); })
+    .then(function(rows){
+      if(!Array.isArray(rows)||!rows.length)return;
+      enrichCallCapAsync(rows[0].id, rows[0].descrizione||text);
+    }).catch(function(){});
+}
+
+// Dopo il salvataggio: completa i CAP che richiedono la ricerca online
+function enrichCallCapAsync(callId, text){
+  if(!callId || !isOnline()) return;
+  addMissingCaps(text, true).then(function(r){
+    if(!r.changed || r.text===text) return;
+    markOwnWrite();
+    sbFetch('chiamate?id=eq.'+callId,{method:'PATCH',body:{descrizione:r.text},prefer:'return=minimal'})
+      .then(function(res){ if(res.ok) loadRows(PAGE); })
+      .catch(function(){});
+  });
 }
 
 // ───────────────────────────────────────────────────────────
