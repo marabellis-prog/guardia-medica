@@ -5574,7 +5574,9 @@ function doSendMail(){
     chiudi('mmail');
     var quota='';
     if(lastMailRemaining!==null){
-      quota=' · Restan'+(lastMailRemaining===1?'e 1 invio':'o '+lastMailRemaining+' invii')+' oggi';
+      if(lastMailRemaining<=0)      quota=' · Hai esaurito gli invii di oggi: riprova domani.';
+      else if(lastMailRemaining===1)quota=' · Resta 1 solo invio per oggi.';
+      else                          quota=' · Restano '+lastMailRemaining+' invii oggi.';
     }
     fb(true,'Mail inviata','Messaggio inviato a '+to+(files.length?(' con '+files.length+(files.length===1?' allegato':' allegati')):'')+'.'+quota);
     loadRows(PAGE);
