@@ -776,6 +776,14 @@ tbody tr.has-attachments td{padding-bottom:.35rem}
 [data-theme="dark"] .mail-link{color:#c99ae0;background:rgba(201,154,224,.12);text-decoration-color:rgba(201,154,224,.4)}
 [data-theme="dark"] .mail-link:hover{background:#c99ae0;color:#2a1038}
 
+/* Modal scelta azione su email: indirizzo leggibile e mandato a capo se lungo */
+.mail-addr-view{
+  font-size:1.05rem;font-weight:700;color:var(--tx);
+  text-align:center;padding:.5rem .25rem;line-height:1.4;
+  overflow-wrap:anywhere;word-break:break-word;
+}
+@media(max-width:420px){ .mail-addr-view{font-size:.95rem} }
+
 /* Modal invio mail — .mbox.mail-box per battere le regole !important del safety net */
 .mbox.mail-box{
   max-width:min(94vw,560px);width:min(94vw,560px);
