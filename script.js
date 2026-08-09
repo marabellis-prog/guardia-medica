@@ -4969,7 +4969,15 @@ function copyMailAddress(){
         if(btn){ btn.style.color=''; btn.style.borderColor=''; }
       },900);
     } else if(!ok){
-      fb(false,'Copia fallita','Il browser ha bloccato la copia automatica.');
+      // Fallback manuale: seleziono l'indirizzo così basta un tocco prolungato → Copia
+      try{
+        var v=document.getElementById('mailChoiceAddr');
+        if(v){
+          var rg=document.createRange(); rg.selectNodeContents(v);
+          var sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(rg);
+        }
+      }catch(_){}
+      fb(false,'Copia automatica bloccata','Ho selezionato l\'indirizzo: tienilo premuto e scegli "Copia".');
     }
   });
 }
