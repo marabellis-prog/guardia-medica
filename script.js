@@ -5391,6 +5391,7 @@ function svgAttach(){
 // ═══════════════════════════════════════════════════════════════════
 var MAIL_MAX_TOTAL_BYTES=9*1024*1024; // limite prudenziale allegati mail (~9 MB)
 var mailModalCallId=null;
+var lastMailRemaining=null;   // invii ancora disponibili oggi (dal servizio di posta)
 var mailChoiceAddr='', mailChoiceCallId=null;
 
 // Click su un'email → prima si sceglie: copia negli appunti oppure invia mail
@@ -5541,6 +5542,7 @@ function doSendMail(){
     }).then(function(res){
       return res.json().catch(function(){return {};}).then(function(data){
         if(!res.ok) throw new Error((data&&(data.error||data.message))||('http_'+res.status));
+        lastMailRemaining=(data&&typeof data.remaining==='number')?data.remaining:null;
         return atts;
       });
     });
@@ -5570,7 +5572,11 @@ function doSendMail(){
     if(can) can.disabled=false;
     if(pr) pr.style.display='none';
     chiudi('mmail');
-    fb(true,'Mail inviata','Messaggio inviato a '+to+(files.length?(' con '+files.length+(files.length===1?' allegato':' allegati')):'')+'.');
+    var quota='';
+    if(lastMailRemaining!==null){
+      quota=' · Restan'+(lastMailRemaining===1?'e 1 invio':'o '+lastMailRemaining+' invii')+' oggi';
+    }
+    fb(true,'Mail inviata','Messaggio inviato a '+to+(files.length?(' con '+files.length+(files.length===1?' allegato':' allegati')):'')+'.'+quota);
     loadRows(PAGE);
   }).catch(function(e){
     if(btn){ btn.disabled=false; btn.innerHTML=svgMailSend()+' Invia'; }
