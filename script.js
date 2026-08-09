@@ -2234,7 +2234,8 @@ function syncProcess(){
       syncSaveQueue(newQ);
       syncRenderBadge();
       var anyOk=results.some(function(r){return r.ok;});
-      if(anyOk) loadRows(PAGE); // refresh elenco se almeno una è andata a buon fine
+      // safeReloadRows: mai ridisegnare se ci sono modifiche non ancora salvate
+      if(anyOk) safeReloadRows();
     });
   });
 }
@@ -2289,14 +2290,55 @@ function scheduleAutosave(tr){
   if(!tr||!tr.dataset)return;
   var rowId=tr.dataset.row;
   if(!rowId)return;
+  // Cattura SUBITO i dati: se la tabella venisse ridisegnata nel frattempo,
+  // il salvataggio parte comunque da questi valori (nessuna perdita).
+  var snapshot=null;
+  try{ snapshot=buildPatchBodyFromRow(tr); }catch(_){}
   if(autosaveTimers[rowId])clearTimeout(autosaveTimers[rowId]);
   autosaveTimers[rowId]=setTimeout(function(){
     delete autosaveTimers[rowId];
-    if(!document.body.contains(tr))return;
-    if(!dirtyMap[rowId])return;
-    if(tr.contains(document.activeElement))return; // utente è tornato
+    if(!dirtyMap[rowId])return;                       // già salvata altrove
+    if(!document.body.contains(tr)){
+      // Riga ridisegnata: salva dallo snapshot invece di perdere la modifica
+      if(snapshot){ syncEnqueue(rowId,snapshot); syncProcess(); }
+      delete dirtyMap[rowId];
+      return;
+    }
+    if(tr.contains(document.activeElement)){
+      // L'utente è ancora dentro la riga: RIPROVA più tardi (prima si arrendeva
+      // e la modifica restava non salvata finché non usciva di nuovo dal campo)
+      scheduleAutosave(tr);
+      return;
+    }
     silentAutoSave(tr,rowId);
   },AUTOSAVE_DELAY);
+}
+
+// Rete di sicurezza: ogni 8s salva le righe modificate che non sono in uso.
+// Garantisce il salvataggio anche se l'evento di uscita dal campo non arriva.
+function autosaveWatchdog(){
+  var keys=Object.keys(dirtyMap);
+  if(!keys.length)return;
+  keys.forEach(function(rowId){
+    var info=dirtyMap[rowId]; if(!info||!info.tr)return;
+    var tr=info.tr;
+    if(!document.body.contains(tr)){
+      var body=null; try{ body=buildPatchBodyFromRow(tr); }catch(_){}
+      if(body){ syncEnqueue(rowId,body); syncProcess(); }
+      delete dirtyMap[rowId];
+      return;
+    }
+    if(tr.contains(document.activeElement))return;  // ci sta scrivendo ora
+    if(autosaveTimers[rowId])return;                // c'è già un salvataggio programmato
+    silentAutoSave(tr,rowId);
+  });
+}
+if(typeof window!=='undefined'){
+  setInterval(autosaveWatchdog,8000);
+  // Salva subito se l'app va in background (cambio app / schermo spento)
+  document.addEventListener('visibilitychange',function(){
+    if(document.hidden) autosaveWatchdog();
+  });
 }
 
 function cancelAutosave(rowId){
@@ -4005,6 +4047,14 @@ function enrichNewCallCap(clientUuid, text){
 // ── CAP sulle chiamate GIÀ IN ARCHIVIO ──────────────────────────────
 var capEnrichDone={};   // id già valutati in questa sessione (evita ripassaggi)
 
+// Ridisegna l'elenco SOLO se non c'è nulla in sospeso: un redraw mentre l'utente
+// sta scrivendo azzera dirtyMap e stacca la riga → la modifica andrebbe persa.
+function safeReloadRows(){
+  if(Object.keys(dirtyMap).length>0)return;
+  if(isUserBusy())return;
+  loadRows(PAGE);
+}
+
 // Riscrive la cella descrizione senza ricaricare tutto (niente sfarfallio/loop)
 function updateRowDescInPlace(id,text){
   var tr=document.querySelector('tr[data-row="'+id+'"]');
@@ -4049,6 +4099,7 @@ function enrichVisibleCallsCap(records){
   records.forEach(function(r){
     if(!r.id||String(r.id).indexOf('local_')===0)return;
     if(capEnrichDone[r.id])return;
+    if(dirtyMap[String(r.id)])return;     // modifiche in corso: non interferire
     var txt=r.descrizione||'';
     if(!txt)return;
     var senzaCap=findAddressesInText(txt).filter(function(a){ return !hasCap(a.text); });
@@ -4081,7 +4132,7 @@ function capBackfillArchive(){
       var next=function(){
         if(i>=updates.length){
           try{localStorage.setItem(KEY,'done');}catch(_){}
-          loadRows(PAGE);
+          safeReloadRows();
           fb(true,'CAP completati',updates.length+' chiamat'+(updates.length===1?'a aggiornata':'e aggiornate')+' con il CAP mancante.');
           return;
         }
@@ -4199,7 +4250,7 @@ function enrichCallCapAsync(callId, text){
     if(!r.changed || r.text===text) return;
     markOwnWrite();
     sbFetch('chiamate?id=eq.'+callId,{method:'PATCH',body:{descrizione:r.text},prefer:'return=minimal'})
-      .then(function(res){ if(res.ok) loadRows(PAGE); })
+      .then(function(res){ if(res.ok) safeReloadRows(); })
       .catch(function(){});
   });
 }
