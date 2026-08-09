@@ -797,6 +797,7 @@ tbody tr.has-attachments td{padding-bottom:.35rem}
   max-width:min(94vw,560px);width:min(94vw,560px);
   text-align:left;padding:0;display:flex;flex-direction:column;
   max-height:92vh;max-height:92dvh;
+  position:relative;   /* ancora il velo di attesa al modal */
 }
 .mail-head{
   display:flex;align-items:center;justify-content:space-between;gap:10px;
@@ -834,6 +835,28 @@ tbody tr.has-attachments td{padding-bottom:.35rem}
   margin-top:.75rem;padding:.6rem .85rem;border-radius:8px;
   background:var(--erbg);color:var(--er);font-size:.85rem;font-weight:500;line-height:1.45;
 }
+
+/* Velo di attesa sopra il modal durante l'invio */
+.mail-loading{
+  position:absolute;inset:0;z-index:5;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--surface);
+  border-radius:inherit;
+  animation:mailLoadIn .15s ease-out;
+}
+@keyframes mailLoadIn{from{opacity:0}to{opacity:1}}
+.mail-loading-inner{
+  display:flex;flex-direction:column;align-items:center;gap:.85rem;
+  text-align:center;padding:1.5rem;max-width:90%;
+}
+.mail-spin{
+  width:44px;height:44px;border-radius:50%;
+  border:4px solid var(--prl);
+  border-top-color:var(--pr);
+  animation:sp .8s linear infinite;
+}
+.mail-loading-text{font-weight:700;color:var(--tx);font-size:1rem;line-height:1.4}
+.mail-loading-sub{font-size:.82rem;color:var(--txm)}
 
 /* Mobile: modal mail quasi a tutto schermo, corpo scrollabile, pulsanti sempre visibili */
 @media(max-width:640px){
