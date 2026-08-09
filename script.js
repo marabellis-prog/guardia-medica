@@ -1339,6 +1339,8 @@ document.addEventListener('DOMContentLoaded',function(){
   setupAttachWiring();
   // MAIL: wiring modal invio al paziente
   setupMailWiring();
+  // CAP: wiring modal conferma CAP discordante
+  setupCapWiring();
 
   // Le altre operazioni (syncProcess, autoPurgeOld, refreshTrashBadge)
   // richiedono JWT e vengono lanciate dentro setupAuth dopo il login.
@@ -2322,6 +2324,8 @@ function silentAutoSave(tr,rowId){
     setTimeout(function(){tr.classList.remove('saved-pulse');},900);
     // Ri-rileva eventuali numeri nuovi inseriti nella cella
     relinkifyRow(tr);
+    // Indirizzo modificato: ricontrolla il CAP (aggiunge se manca, chiede se diverso)
+    checkCapAfterEdit(rowId, de);
     // Aggiorna lastKnownUpdate per non triggerare banner per modifiche nostre
     fetchLatestUpdate().then(function(ts){if(ts)lastKnownUpdate=ts;});
   };
@@ -2709,6 +2713,7 @@ function saveEdit(info,floppyEl,onDone){
       tr.classList.remove('pending-sync');
       if(po)localStorage.setItem('lastPostazione',po);
       relinkifyRow(tr);
+      checkCapAfterEdit(ri, de);
       fetchLatestUpdate().then(function(ts){if(ts)lastKnownUpdate=ts;});
       fb(true,'Salvata','Chiamata aggiornata.');
     } else {
@@ -3358,6 +3363,7 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mattachDel')){chiudi('mattachDel');attachToDelete=null;}
   if(e.target===document.getElementById('mmail'))chiudi('mmail');
   if(e.target===document.getElementById('mmailChoice'))chiudi('mmailChoice');
+  if(e.target===document.getElementById('mcap'))closeCapMismatch(); // = Mantieni
 });
 
 
@@ -4088,6 +4094,102 @@ function capBackfillArchive(){
       };
       next();
     }).catch(function(){});
+}
+
+// ── CONTROLLO CAP DOPO UNA MODIFICA DELL'INDIRIZZO ──────────────────
+// Se manca → lo aggiunge da solo. Se c'è ma risulta diverso → chiede conferma.
+var capMismatchAsked={};     // già proposto in questa sessione: non insistere
+var capMismatchQueue=[];
+var capMismatchCurrent=null;
+
+function checkCapAfterEdit(callId, text){
+  if(!callId||!text)return;
+  if(String(callId).indexOf('local_')===0)return;
+  var addrs=findAddressesInText(text);
+  if(!addrs.length)return;
+
+  Promise.all(addrs.map(function(a){
+    var m=a.text.match(/\b(\d{5})\b/);
+    var attuale=m?m[1]:null;
+    var locale=capFromTable(a.text);
+    if(locale) return Promise.resolve({a:a, atteso:locale, attuale:attuale});
+    if(!isOnline()) return Promise.resolve(null);
+    return capFromOnline(a.text).then(function(c){ return c?{a:a, atteso:c, attuale:attuale}:null; });
+  })).then(function(res){
+    var items=res.filter(Boolean);
+    if(!items.length)return;
+
+    // 1) CAP mancante → inserimento automatico
+    var mancanti=items.filter(function(x){ return !x.attuale; });
+    if(mancanti.length){
+      var out=text;
+      mancanti.sort(function(x,y){ return y.a.end-x.a.end; });
+      mancanti.forEach(function(x){ out=out.slice(0,x.a.end)+' '+x.atteso+out.slice(x.a.end); });
+      if(out!==text) patchCapOnCall(callId,out);
+    }
+
+    // 2) CAP presente ma diverso → chiedi conferma
+    items.filter(function(x){ return x.attuale && x.attuale!==x.atteso; })
+         .forEach(function(x){
+      var key=callId+'|'+x.a.text+'|'+x.atteso;
+      if(capMismatchAsked[key])return;
+      capMismatchAsked[key]=true;
+      capMismatchQueue.push({callId:callId, addr:x.a.text, attuale:x.attuale, atteso:x.atteso});
+    });
+    showNextCapMismatch();
+  }).catch(function(){});
+}
+
+function showNextCapMismatch(){
+  if(capMismatchCurrent)return;                       // una alla volta
+  if(!capMismatchQueue.length)return;
+  if(document.querySelector('.mov.open'))return;       // non accavallarsi ad altri modali
+  capMismatchCurrent=capMismatchQueue.shift();
+  var it=capMismatchCurrent;
+  var msg=document.getElementById('mcapMsg');
+  if(msg){
+    msg.innerHTML='Per questo indirizzo:<div class="cap-addr">'+esc(it.addr)+'</div>'
+      +'risulta il CAP <b>'+esc(it.atteso)+'</b>, ma nella chiamata è scritto <b>'+esc(it.attuale)+'</b>.'
+      +'<br><br>Vuoi correggerlo?';
+  }
+  var k=document.getElementById('capKeepVal'); if(k)k.textContent=it.attuale;
+  var f=document.getElementById('capFixVal');  if(f)f.textContent=it.atteso;
+  apri('mcap');
+}
+
+function closeCapMismatch(){
+  chiudi('mcap');
+  capMismatchCurrent=null;
+  setTimeout(showNextCapMismatch,350);   // eventuale successivo in coda
+}
+
+// Sostituisce il CAP SOLO dentro quell'indirizzo (non altrove nel testo)
+function applyCapCorrection(){
+  var it=capMismatchCurrent;
+  if(!it){ closeCapMismatch(); return; }
+  sbFetch('chiamate?id=eq.'+it.callId+'&select=descrizione')
+    .then(function(r){ return r.json(); })
+    .then(function(rows){
+      var t=(rows&&rows[0]&&rows[0].descrizione)||'';
+      var idx=t.indexOf(it.addr);
+      if(idx===-1){ closeCapMismatch(); return; }
+      var seg=t.slice(idx, idx+it.addr.length);
+      var segNew=seg.replace(new RegExp('\\b'+it.attuale+'\\b'), it.atteso);
+      if(segNew===seg){ closeCapMismatch(); return; }
+      var out=t.slice(0,idx)+segNew+t.slice(idx+it.addr.length);
+      return patchCapOnCall(it.callId,out).then(function(){
+        fb(true,'CAP corretto','Aggiornato in '+it.atteso+'.');
+      });
+    })
+    .catch(function(){})
+    .then(function(){ closeCapMismatch(); });
+}
+
+function setupCapWiring(){
+  var keep=document.getElementById('btnCapKeep');
+  if(keep) keep.addEventListener('click', closeCapMismatch);
+  var fix=document.getElementById('btnCapFix');
+  if(fix) fix.addEventListener('click', applyCapCorrection);
 }
 
 // Dopo il salvataggio: completa i CAP che richiedono la ricerca online
