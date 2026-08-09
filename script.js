@@ -288,6 +288,8 @@ async function setupAuth(){
   setupGirate();
   // Recupera eventuale bozza di nuova chiamata non ancora salvata
   restoreDraft();
+  // CAP mancanti nell'archivio storico: passata unica con la tabella locale
+  setTimeout(capBackfillArchive, 4000);
 }
 
 async function authSignInWithGoogle(forceAccountChoice){
@@ -1803,6 +1805,8 @@ function loadRows(pg){
     // Allegati: carica e inietta le righe "Allegati" (non blocca il render principale)
     var attIds=records.map(function(r){return r.id;});
     loadAttachmentsForCalls(attIds).then(injectAttachRows);
+    // CAP: completa quelli mancanti nelle chiamate visibili
+    enrichVisibleCallsCap(records);
   }).catch(function(e){
     hideLoader();
     renderOfflineFallback(pg, e);
@@ -3917,9 +3921,18 @@ function capFromOnline(addrText){
         });
         // (b) tutti i risultati devono concordare
         if(pcs.length===1){
-          // (c) la via trovata deve corrispondere a quella scritta
-          var ok=list.some(function(x){ return x&&x.address&&roadMatches(addrText, x.address.road); });
-          if(ok) val=pcs[0];
+          var low=' '+String(addrText).toLowerCase()+' ';
+          var okRoad=false, okCity=false;
+          list.forEach(function(x){
+            var ad=x&&x.address; if(!ad)return;
+            // (c) la via trovata deve corrispondere a quella scritta
+            if(roadMatches(addrText, ad.road)) okRoad=true;
+            // (d) il comune trovato deve essere SCRITTO nell'indirizzo: senza comune
+            //     non c'è modo di distinguere vie omonime in paesi diversi
+            var com=ad.city||ad.town||ad.village||ad.municipality||'';
+            if(com && low.indexOf(com.toLowerCase())!==-1) okCity=true;
+          });
+          if(okRoad&&okCity) val=pcs[0];
         }
       }
       capCacheSet(key,val);
@@ -3980,6 +3993,100 @@ function enrichNewCallCap(clientUuid, text){
     .then(function(rows){
       if(!Array.isArray(rows)||!rows.length)return;
       enrichCallCapAsync(rows[0].id, rows[0].descrizione||text);
+    }).catch(function(){});
+}
+
+// ── CAP sulle chiamate GIÀ IN ARCHIVIO ──────────────────────────────
+var capEnrichDone={};   // id già valutati in questa sessione (evita ripassaggi)
+
+// Riscrive la cella descrizione senza ricaricare tutto (niente sfarfallio/loop)
+function updateRowDescInPlace(id,text){
+  var tr=document.querySelector('tr[data-row="'+id+'"]');
+  if(!tr)return;
+  var cell=tr.querySelector('[data-field="descrizione"]');
+  if(!cell)return;
+  if(document.activeElement===cell)return;      // l'utente ci sta scrivendo: non toccare
+  if(dirtyMap[String(id)])return;               // modifiche non ancora salvate: non toccare
+  var badge=cell.querySelector(':scope > .girata-badge');
+  var prefix=badge?(badge.outerHTML+'<br>'):'';
+  cell.innerHTML=prefix+linkifyAll(esc(text));
+}
+
+function patchCapOnCall(id,text){
+  capEnrichDone[id]=true;
+  markOwnWrite();
+  return sbFetch('chiamate?id=eq.'+id,{method:'PATCH',body:{descrizione:text},prefer:'return=minimal'})
+    .then(function(res){ if(res.ok) updateRowDescInPlace(id,text); })
+    .catch(function(){});
+}
+
+// Coda online throttlata (il servizio mappe consente ~1 richiesta al secondo)
+function processOnlineCapQueue(list){
+  if(!list||!list.length||!isOnline())return;
+  var i=0;
+  var step=function(){
+    if(i>=list.length)return;
+    var item=list[i++];
+    addMissingCaps(item.text,true).then(function(r){
+      if(r.changed&&r.text!==item.text) patchCapOnCall(item.id,r.text);
+      else capEnrichDone[item.id]=true;
+      setTimeout(step,1300);
+    }).catch(function(){ capEnrichDone[item.id]=true; setTimeout(step,1300); });
+  };
+  step();
+}
+
+// Completa i CAP delle chiamate visibili nella pagina corrente
+function enrichVisibleCallsCap(records){
+  if(!records||!records.length)return;
+  var online=[];
+  records.forEach(function(r){
+    if(!r.id||String(r.id).indexOf('local_')===0)return;
+    if(capEnrichDone[r.id])return;
+    var txt=r.descrizione||'';
+    if(!txt)return;
+    var senzaCap=findAddressesInText(txt).filter(function(a){ return !hasCap(a.text); });
+    if(!senzaCap.length){ capEnrichDone[r.id]=true; return; }
+    var conTabella=addCapsLocalSync(txt);
+    if(conTabella!==txt) patchCapOnCall(r.id,conTabella);   // certo e immediato
+    else online.push({id:r.id,text:txt});                   // serve la ricerca online
+  });
+  processOnlineCapQueue(online.slice(0,6)); // max 6 ricerche online per pagina
+}
+
+// Passata unica sull'intero archivio con la SOLA tabella locale (certa e senza
+// rete): completa in un colpo tutte le chiamate dei comuni serviti.
+function capBackfillArchive(){
+  var KEY='capBackfill_v1';
+  try{ if(localStorage.getItem(KEY)==='done')return; }catch(_){}
+  sbFetch('chiamate?deleted_at=is.null&select=id,descrizione&limit=1000')
+    .then(function(r){ return r.json(); })
+    .then(function(rows){
+      if(!Array.isArray(rows)){ return; }
+      var updates=[];
+      rows.forEach(function(r){
+        var t=r.descrizione||'';
+        if(!t)return;
+        var n=addCapsLocalSync(t);
+        if(n!==t) updates.push({id:r.id,text:n});
+      });
+      if(!updates.length){ try{localStorage.setItem(KEY,'done');}catch(_){} return; }
+      var i=0;
+      var next=function(){
+        if(i>=updates.length){
+          try{localStorage.setItem(KEY,'done');}catch(_){}
+          loadRows(PAGE);
+          fb(true,'CAP completati',updates.length+' chiamat'+(updates.length===1?'a aggiornata':'e aggiornate')+' con il CAP mancante.');
+          return;
+        }
+        var chunk=updates.slice(i,i+10); i+=10;
+        markOwnWrite();
+        Promise.all(chunk.map(function(u){
+          capEnrichDone[u.id]=true;
+          return sbFetch('chiamate?id=eq.'+u.id,{method:'PATCH',body:{descrizione:u.text},prefer:'return=minimal'}).catch(function(){});
+        })).then(function(){ setTimeout(next,200); });
+      };
+      next();
     }).catch(function(){});
 }
 
