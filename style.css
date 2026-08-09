@@ -776,8 +776,8 @@ tbody tr.has-attachments td{padding-bottom:.35rem}
 [data-theme="dark"] .mail-link{color:#c99ae0;background:rgba(201,154,224,.12);text-decoration-color:rgba(201,154,224,.4)}
 [data-theme="dark"] .mail-link:hover{background:#c99ae0;color:#2a1038}
 
-/* Modal invio mail */
-.mail-box{
+/* Modal invio mail — .mbox.mail-box per battere le regole !important del safety net */
+.mbox.mail-box{
   max-width:min(94vw,560px);width:min(94vw,560px);
   text-align:left;padding:0;display:flex;flex-direction:column;
   max-height:92vh;max-height:92dvh;
@@ -821,10 +821,10 @@ tbody tr.has-attachments td{padding-bottom:.35rem}
 
 /* Mobile: modal mail quasi a tutto schermo, corpo scrollabile, pulsanti sempre visibili */
 @media(max-width:640px){
-  .mail-box{
-    max-width:100vw!important;width:100vw!important;
-    max-height:100vh!important;max-height:100dvh!important;
-    height:100dvh;border-radius:0!important;padding:0!important;
+  .mbox.mail-box{
+    max-width:100%!important;width:100%!important;
+    max-height:100dvh!important;height:100dvh!important;
+    border-radius:0!important;padding:0!important;
   }
   .mail-head{padding:.85rem 1rem;padding-top:calc(.85rem + env(safe-area-inset-top))}
   .mail-body{padding:.85rem 1rem}
