@@ -1064,3 +1064,14 @@ body{max-width:100%;overflow-x:clip}
   .mac button{padding:0 .85rem;height:36px;font-size:.85rem}
   .hquick{gap:.35rem}
 }
+
+/* ═══════════════════════════════════════
+   CURSORE ACCANTO AI LINK (touch)
+   Su iOS/iPadOS il cursore non riesce a posizionarsi a fianco di un elemento
+   non modificabile se non ha testo attorno: nel JS aggiungiamo uno spazio a
+   larghezza zero prima e dopo ogni link. Qui allarghiamo il margine sui
+   dispositivi touch, così c'è anche un'area fisica dove toccare.
+═══════════════════════════════════════ */
+@media(hover:none){
+  .ph-link,.addr-link,.mail-link{margin:0 4px}
+}
