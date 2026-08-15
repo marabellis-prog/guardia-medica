@@ -1356,6 +1356,7 @@ function sanitizeText(str){
   str=String(str);
   str=str.replace(/<[^>]*>/g,'');
   str=str.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g,'');
+  str=str.replace(/\u200B/g,''); // toglie gli spazi invisibili usati per il cursore su iOS
   str=str.replace(/^[\s]*([=+\-@|`])/g,"'$1");
   return str.trim();
 }
@@ -2692,7 +2693,7 @@ function getCellTextNoBadge(tr, field){
   clone.style.top='0';
   clone.style.whiteSpace='pre-wrap';
   document.body.appendChild(clone);
-  var txt = clone.innerText || '';
+  var txt = (clone.innerText || '').replace(/\u200B/g,'');
   if(clone.parentNode) clone.parentNode.removeChild(clone);
   return txt.trim();
 }
@@ -3787,7 +3788,7 @@ function linkifyPhones(html){
     var isMobile = /^(?:39)?3\d{9}$/.test(digits);
     var isFisso  = /^(?:39)?0\d{7,10}$/.test(digits);
     if(!isMobile && !isFisso) return match;
-    return '<span class="ph-link" contenteditable="false" data-phone="'+digits+'" title="Tocca per chiamare">'+match+'</span>';
+    return '\u200B<span class="ph-link" contenteditable="false" data-phone="'+digits+'" title="Tocca per chiamare">'+match+'</span>\u200B';
   });
 }
 
@@ -4276,7 +4277,7 @@ var EMAIL_RE=/(?<![\w.%+\-@])[A-Za-z0-9._%+\-]+@(?:[A-Za-z0-9](?:[A-Za-z0-9\-]*[
 function linkifyEmails(html){
   return replaceOutsideTags(html, EMAIL_RE, function(match){
     var addr=match.toLowerCase();
-    return '<span class="mail-link" contenteditable="false" data-mail="'+escAttr(addr)+'" title="Tocca per inviare una mail">'+match+'</span>';
+    return '\u200B<span class="mail-link" contenteditable="false" data-mail="'+escAttr(addr)+'" title="Tocca per inviare una mail">'+match+'</span>\u200B';
   });
 }
 
@@ -4295,7 +4296,7 @@ function linkifyAddresses(html){
     if(clean.length<6)return match;
     var rest=match.substring(clean.length);
     var query=clean.replace(/"/g,'&quot;');
-    return '<span class="addr-link" contenteditable="false" data-addr="'+query+'" title="Tocca per aprire mappa">'+clean+'</span>'+rest;
+    return '\u200B<span class="addr-link" contenteditable="false" data-addr="'+query+'" title="Tocca per aprire mappa">'+clean+'</span>\u200B'+rest;
   });
 }
 
@@ -5039,7 +5040,7 @@ function relinkifyRow(tr){
     // attacco il clone fuori schermo, leggo, stacco.
     clone.style.position='absolute';clone.style.left='-99999px';clone.style.top='0';clone.style.whiteSpace='pre-wrap';
     document.body.appendChild(clone);
-    var raw=clone.innerText||'';
+    var raw=(clone.innerText||'').replace(/\u200B/g,'');
     if(clone.parentNode)clone.parentNode.removeChild(clone);
     var newBody=linkifyAll(esc(raw));
     var newHtml=preservedPrefix+newBody;
