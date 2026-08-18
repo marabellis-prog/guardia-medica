@@ -1325,3 +1325,14 @@ body{max-width:100%;overflow-x:clip}
   font-size:12px;color:#111;padding:0 2px 1px;min-height:15px;
   white-space:nowrap;overflow:hidden;
 }
+
+/* Correzioni di resa del Modulo M */
+.modm-foglio{text-align:left}                     /* i modali sono centrati: il foglio no */
+.modm-foglio input,.modm-foglio textarea{text-align:left}
+/* Durante la generazione del PDF le etichette verticali diventano orizzontali:
+   la scrittura verticale non viene resa correttamente dal generatore */
+.mm-stampa .mm-cat-lbl,.mm-stampa .mm-cat-lbl-tall{
+  writing-mode:horizontal-tb!important;transform:none!important;
+  flex:0 0 54px!important;font-size:8.5px!important;line-height:1.15;
+  text-align:center;padding:3px 2px!important;word-break:break-word;
+}
