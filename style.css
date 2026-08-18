@@ -1210,7 +1210,9 @@ body{max-width:100%;overflow-x:clip}
 .mm-altre{padding:4px 8px 8px;border-bottom:1.2px solid #4a5878}
 
 /* Figura corporea interattiva */
-.mm-fig-wrap{position:relative;flex:1;min-height:250px}
+/* La sagoma cede un po di altezza per far stare la firma senza sforare
+   le proporzioni A4: resta comunque la stessa figura, solo piu raccolta. */
+.mm-fig-wrap{position:relative;flex:1;min-height:205px}
 .mm-fig-canvas{
   position:absolute;inset:0;cursor:crosshair;
   background-repeat:no-repeat;background-position:center;background-size:contain;
