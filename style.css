@@ -1333,7 +1333,7 @@ body{max-width:100%;overflow-x:clip}
    la scrittura verticale non viene resa correttamente dal generatore */
 .mm-stampa .mm-cat-lbl,.mm-stampa .mm-cat-lbl-tall{
   writing-mode:horizontal-tb!important;transform:none!important;
-  flex:0 0 54px!important;font-size:8.5px!important;line-height:1.15;
+  flex:0 0 62px!important;font-size:8px!important;line-height:1.15;
   text-align:center;padding:3px 2px!important;word-break:break-word;
 }
 
