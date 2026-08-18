@@ -5459,10 +5459,43 @@ function openMailModal(email, callId){
   var sl=document.getElementById('mailSelectedList'); if(sl)sl.innerHTML='';
   var er=document.getElementById('mailErr');      if(er){er.style.display='none';er.textContent='';}
   setModalBusy('mmail', false);   // ripristina: velo nascosto, pulsanti attivi
+  renderMailExisting(callId);     // allegati già in archivio per questa chiamata
   var nb=document.getElementById('mailNoCallNote');
   if(nb) nb.style.display = callId ? 'none' : 'block';
   apri('mmail');
   setTimeout(function(){ var s=document.getElementById('mailSubject'); if(s)s.focus(); },250);
+}
+
+// Elenca gli allegati già caricati su questa chiamata, con casella di spunta
+// per rispedirli senza doverli ricaricare da capo.
+function renderMailExisting(callId){
+  var wrap=document.getElementById('mailExistingWrap');
+  var list=document.getElementById('mailExistingList');
+  if(!wrap||!list)return;
+  var att=(callId!=null)?(attachmentsByCall[String(callId)]||[]):[];
+  if(!att.length){ wrap.style.display='none'; list.innerHTML=''; return; }
+  list.innerHTML=att.map(function(a){
+    return '<label class="mail-exist-item">'
+      +'<input type="checkbox" class="mail-exist-cb" data-drive="'+escAttr(a.drive_file_id)+'"'
+        +' data-name="'+escAttr(a.file_name)+'" data-size="'+(a.size_bytes||0)+'">'
+      +'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>'
+      +'<span class="mail-exist-name">'+esc(a.file_name)+'</span>'
+      +'<span class="mail-exist-size">'+fmtBytes(a.size_bytes||0)+'</span>'
+    +'</label>';
+  }).join('');
+  wrap.style.display='';
+  list.querySelectorAll('.mail-exist-cb').forEach(function(cb){
+    cb.addEventListener('change', renderMailSelected);   // aggiorna il peso totale
+  });
+}
+
+// Allegati già presenti che l'utente ha spuntato
+function mailCheckedExisting(){
+  var out=[];
+  document.querySelectorAll('#mailExistingList .mail-exist-cb').forEach(function(cb){
+    if(cb.checked) out.push({drive:cb.dataset.drive, name:cb.dataset.name, size:parseInt(cb.dataset.size,10)||0});
+  });
+  return out;
 }
 
 function renderMailSelected(){
@@ -5470,8 +5503,17 @@ function renderMailSelected(){
   var sel=document.getElementById('mailSelectedList');
   if(!inp||!sel)return;
   var files=inp.files?Array.prototype.slice.call(inp.files):[];
-  if(!files.length){ sel.innerHTML=''; return; }
-  var tot=0; files.forEach(function(f){ tot+=f.size||0; });
+  var esistenti=mailCheckedExisting();
+  var tot=0;
+  files.forEach(function(f){ tot+=f.size||0; });
+  esistenti.forEach(function(e){ tot+=e.size||0; });
+  if(!files.length){
+    // nessun file nuovo: mostra solo l'eventuale avviso di peso
+    sel.innerHTML=(tot>MAIL_MAX_TOTAL_BYTES)
+      ? '<div class="mail-warn">Totale '+fmtBytes(tot)+': troppo pesante per una mail (max '+fmtBytes(MAIL_MAX_TOTAL_BYTES)+'). Togli qualche allegato.</div>'
+      : '';
+    return;
+  }
   sel.innerHTML=files.map(function(f){
     return '<div class="attach-sel-item"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><polyline points="13 2 13 9 20 9"/></svg>'
       +'<span class="attach-sel-name">'+esc(f.name)+'</span><span class="attach-sel-size">'+fmtBytes(f.size)+'</span></div>';
@@ -5495,20 +5537,6 @@ function mailShowErr(msg){
   if(er){ er.textContent=msg; er.style.display='block'; }
 }
 
-// Aggiunge la traccia documentale nelle note della chiamata
-function appendMailNote(callId, to){
-  if(!callId) return Promise.resolve();
-  var stamp=formatTSFromISO(new Date().toISOString());
-  var line='[Mail inviata a '+to+' il '+stamp+']';
-  return sbFetch('chiamate?id=eq.'+callId+'&select=note')
-    .then(function(r){return r.json();})
-    .then(function(rows){
-      var cur=(Array.isArray(rows)&&rows[0]&&rows[0].note)?rows[0].note:'';
-      var next=cur?(cur+'\n'+line):line;
-      markOwnWrite();
-      return sbFetch('chiamate?id=eq.'+callId,{method:'PATCH',body:{note:next},prefer:'return=minimal'});
-    }).catch(function(){ /* la traccia non deve far fallire l'invio */ });
-}
 
 function doSendMail(){
   var to=(document.getElementById('mailTo').value||'').trim();
@@ -5521,18 +5549,38 @@ function doSendMail(){
   if(!subject){ mailShowErr('Inserisci l\'oggetto della mail.'); return; }
   if(!body){ mailShowErr('Scrivi il messaggio.'); return; }
   if(!isOnline()){ mailShowErr('Serve la connessione per inviare la mail.'); return; }
-  var tot=0; files.forEach(function(f){ tot+=f.size||0; });
+  var esistenti=mailCheckedExisting();   // allegati gia in archivio, spuntati
+  var tot=0;
+  files.forEach(function(f){ tot+=f.size||0; });
+  esistenti.forEach(function(e){ tot+=e.size||0; });
   if(tot>MAIL_MAX_TOTAL_BYTES){ mailShowErr('Allegati troppo pesanti ('+fmtBytes(tot)+'). Massimo '+fmtBytes(MAIL_MAX_TOTAL_BYTES)+'.'); return; }
 
   var er=document.getElementById('mailErr'); if(er)er.style.display='none';
   // Velo di attesa sul modal: molto più visibile dello spinner nel pulsante
   var setBusy=function(attivo,testo){ setModalBusy('mmail', attivo, testo); };
-  setBusy(true, files.length?('Preparo '+files.length+(files.length===1?' allegato…':' allegati…')):'Invio in corso…');
+  var totAllegati=files.length+esistenti.length;
+  setBusy(true, totAllegati?('Preparo '+totAllegati+(totAllegati===1?' allegato…':' allegati…')):'Invio in corso…');
 
-  // 1. Converte gli allegati in base64 per la mail
-  Promise.all(files.map(function(f){
+  // 1a. File nuovi scelti dal dispositivo
+  var pNuovi=Promise.all(files.map(function(f){
     return fileToBase64(f).then(function(b64){ return {name:f.name, content:b64, _file:f}; });
-  })).then(function(atts){
+  }));
+  // 1b. Allegati gia presenti: riscaricati da Drive per essere rispediti
+  var pEsistenti=esistenti.length
+    ? esistenti.reduce(function(chain,e){
+        return chain.then(function(acc){
+          setBusy(true,'Recupero "'+e.name+'" da Drive…');
+          return driveGetBlob(e.drive)
+            .then(fileToBase64)
+            .then(function(b64){ acc.push({name:e.name, content:b64, _file:null}); return acc; })
+            .catch(function(){ throw new Error('allegato_non_recuperato:'+e.name); });
+        });
+      }, Promise.resolve([]))
+    : Promise.resolve([]);
+
+  Promise.all([pNuovi,pEsistenti]).then(function(gruppi){
+    return gruppi[0].concat(gruppi[1]);
+  }).then(function(atts){
     setBusy(true,'Invio della mail in corso…');
     // 2. Invia tramite Edge Function (la chiave del servizio resta lato server)
     return fetch(SUPABASE_URL+'/functions/v1/send-mail',{
@@ -5555,10 +5603,11 @@ function doSendMail(){
     });
   }).then(function(atts){
     // 3. Mail partita: salva gli allegati anche su Drive/chiamata (best effort)
-    if(!atts.length || !mailModalCallId) return null;
+    var daSalvare=atts.filter(function(a){ return !!a._file; });   // solo i file nuovi
+    if(!daSalvare.length || !mailModalCallId) return null;
     setBusy(true,'Mail inviata. Salvo gli allegati nella chiamata…');
     var chain=Promise.resolve();
-    atts.forEach(function(a){
+    daSalvare.forEach(function(a){
       chain=chain.then(function(){
         return driveUpload(a._file).then(function(f){
           return sbFetch('allegati',{method:'POST',prefer:'return=minimal',body:{
@@ -5572,9 +5621,6 @@ function doSendMail(){
     });
     return chain;
   }).then(function(){
-    // 4. Traccia nelle note della chiamata
-    return appendMailNote(mailModalCallId, to);
-  }).then(function(){
     setBusy(false);
     chiudi('mmail');
     var quota='';
@@ -5583,7 +5629,8 @@ function doSendMail(){
       else if(lastMailRemaining===1)quota=' · Resta 1 solo invio per oggi.';
       else                          quota=' · Restano '+lastMailRemaining+' invii oggi.';
     }
-    fb(true,'Mail inviata','Messaggio inviato a '+to+(files.length?(' con '+files.length+(files.length===1?' allegato':' allegati')):'')+'.'+quota);
+    var nAll=files.length+esistenti.length;
+    fb(true,'Mail inviata','Messaggio inviato a '+to+(nAll?(' con '+nAll+(nAll===1?' allegato':' allegati')):'')+'.'+quota);
     loadRows(PAGE);
   }).catch(function(e){
     setBusy(false);
@@ -5593,6 +5640,7 @@ function doSendMail(){
     else if(em.indexOf('http_401')!==-1||em.indexOf('http_403')!==-1) msg='Sessione scaduta. Ricarica la pagina e riprova.';
     else if(em.indexOf('http_413')!==-1||em.indexOf('too_large')!==-1) msg='Allegati troppo pesanti per l\'invio.';
     else if(em.indexOf('invalid_recipient')!==-1) msg='Indirizzo destinatario rifiutato dal servizio di posta.';
+    else if(em.indexOf('allegato_non_recuperato:')!==-1) msg='Non sono riuscito a recuperare da Drive un allegato ('+em.split(':')[1]+'). La mail NON è stata inviata: togli la spunta a quel file e riprova.';
     else if(em) msg='Invio non riuscito ('+em+').';
     mailShowErr(msg);
   });
