@@ -5976,18 +5976,28 @@ function modmAdattaScala(){
   var altDisp = window.innerHeight*0.98 - (barra?barra.offsetHeight:48) - 8;
   var k = Math.min(largDisp/w, altDisp/h, 1);
 
-  // Se la finestra viene comunque stretta, la barra si fa compatta e resta
-  // su una riga sola: cosi l'altezza e nota e il foglio guadagna spazio.
-  if(box && w*k < 430){
+  // Se la finestra viene molto stretta (telefono girato) la barra si fa
+  // compatta e resta su una riga: cosi l'altezza e nota e il foglio respira.
+  if(box && w*k < 330){
     box.classList.add('modm-compatta');
-    altDisp = window.innerHeight*0.98 - (barra?barra.offsetHeight:44) - 8;
+    altDisp = window.innerHeight*0.98 - 40 - 8;      // la barra compatta e alta 40 fissi
     k = Math.min(largDisp/w, altDisp/h, 1);
   }
 
-  foglio.style.transform='scale('+k+')';
-  if(box) box.style.setProperty('--modm-w', Math.round(w*k)+'px');
-  palco.style.width  = Math.round(w*k)+'px';
-  palco.style.height = Math.round(h*k)+'px';
+  var applica=function(scala){
+    foglio.style.transform='scale('+scala+')';
+    if(box) box.style.setProperty('--modm-w', Math.round(w*scala)+'px');
+    palco.style.width  = Math.round(w*scala)+'px';
+    palco.style.height = Math.round(h*scala)+'px';
+  };
+  applica(k);
+
+  // Controllo sul risultato vero: se alla larghezza finale la barra e andata a
+  // capo sforando lo schermo, la rendo compatta e rifaccio il conto una volta sola.
+  if(box && !box.classList.contains('modm-compatta') && box.scrollHeight > window.innerHeight){
+    box.classList.add('modm-compatta');
+    applica(Math.min(largDisp/w, (window.innerHeight*0.98 - 40 - 8)/h, 1));
+  }
 }
 
 // ── Campi a misura fissa: il testo rimpicciolisce fino a un minimo, poi si ferma ──
