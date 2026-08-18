@@ -1341,6 +1341,8 @@ document.addEventListener('DOMContentLoaded',function(){
   setupMailWiring();
   // CAP: wiring modal conferma CAP discordante
   setupCapWiring();
+  // MODULO M: wiring modulo, uscita e eliminazione
+  setupModmWiring();
 
   // Le altre operazioni (syncProcess, autoPurgeOld, refreshTrashBadge)
   // richiedono JWT e vengono lanciate dentro setupAuth dopo il login.
@@ -1808,6 +1810,9 @@ function loadRows(pg){
     // Allegati: carica e inietta le righe "Allegati" (non blocca il render principale)
     var attIds=records.map(function(r){return r.id;});
     loadAttachmentsForCalls(attIds).then(injectAttachRows);
+    // Moduli M gia compilati: innesto mirato, senza ridisegnare (un redraw
+    // mentre si scrive farebbe perdere le modifiche non ancora salvate)
+    caricaModuliM(attIds).then(injectModmUi);
     // CAP: completa quelli mancanti nelle chiamate visibili
     enrichVisibleCallsCap(records);
   }).catch(function(e){
@@ -1968,6 +1973,11 @@ function drawRows(recs,highlightQuery){
       ?'<div class="ich"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>'
       :'<div class="iho" data-row="'+r.id+'"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 22h14M5 2h14M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/></svg></div>';
 
+    // Bottone Modulo M: solo se non ne esiste gia uno salvato per questa chiamata
+    var modmSalvato = moduliMByCall[String(r.id)];
+    var modmBtn = modmSalvato ? '' :
+      '<div class="iho-modm" data-row="'+r.id+'" title="Compila il Modulo M (Relazione Medica)">'+svgModuloM()+'</div>';
+
     // Bottone Allega: su tutte le chiamate già sul server (non sulle locali in attesa)
     var attachBtn = '<div class="iho-attach" data-row="'+r.id+'" title="Allega file">'+svgAttach()+'</div>';
 
@@ -1984,7 +1994,7 @@ function drawRows(recs,highlightQuery){
       +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg>'
       +'</div>';
     return '<tr class="'+(r.completato?'done':'pending')+'" data-row="'+r.id+'" data-original-ts="'+esc(tsf)+'">'
-      +'<td class="tds"><div class="sc">'+si+'<div class="isv" data-row="'+r.id+'" style="display:none">'+svgFloppy()+'</div>'+attachBtn+giraBtn+cestino+'</div></td>'
+      +'<td class="tds"><div class="sc">'+si+'<div class="isv" data-row="'+r.id+'" style="display:none">'+svgFloppy()+'</div>'+modmBtn+attachBtn+giraBtn+cestino+'</div></td>'
       +'<td class="tid">'+r.id+'</td>'
       +'<td class="tdt"><div class="dt-wrap">'
         +'<span class="dt-date" contenteditable="true" data-field="dt-date" spellcheck="false">'+esc(ds)+'</span>'
@@ -1994,6 +2004,16 @@ function drawRows(recs,highlightQuery){
           +'<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="m6 9 6 6 6-6"/></svg>'
           +'<div class="post-dropdown">'+ddOpts+'</div>'
         +'</span>'
+        +(modmSalvato
+          ? '<div class="modm-link-wrap">'
+              +'<span class="modm-link" data-row="'+r.id+'" title="Apri il Modulo M compilato">'
+                +svgModuloM()+'Visualizza modulo M'
+              +'</span>'
+              +'<span class="modm-del" data-row="'+r.id+'" title="Elimina il Modulo M">'
+                +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>'
+              +'</span>'
+            +'</div>'
+          : '')
       +'</div></td>'
       +'<td data-field="descrizione" contenteditable="true" spellcheck="false" style="white-space:pre-wrap;min-width:180px">'+girataBadge+(girataBadge?'<br>':'')+descHtml+'</td>'
       +'<td data-field="note" contenteditable="true" spellcheck="false" style="white-space:pre-wrap">'+noteHtml+'</td>'
@@ -2454,6 +2474,13 @@ function setupTableDelegation(){
       openMailChoice(mailEl.dataset.mail||mailEl.textContent, mailCallId);
       return;
     }
+    var modmBtn2=t.closest('.iho-modm');
+    if(modmBtn2){ e.stopPropagation(); modmApri(parseInt(modmBtn2.dataset.row)); return; }
+    var modmLink=t.closest('.modm-link');
+    if(modmLink){ e.stopPropagation(); modmApri(parseInt(modmLink.dataset.row)); return; }
+    var modmDel=t.closest('.modm-del');
+    if(modmDel){ e.stopPropagation(); modmPromptDelete(parseInt(modmDel.dataset.row)); return; }
+
     var attBtn=t.closest('.iho-attach');
     if(attBtn){
       e.stopPropagation();
@@ -3426,6 +3453,8 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mmail'))chiudi('mmail');
   if(e.target===document.getElementById('mmailChoice'))chiudi('mmailChoice');
   if(e.target===document.getElementById('mcap'))closeCapMismatch(); // = Mantieni
+  if(e.target===document.getElementById('mmodm'))modmChiudi(false);
+  if(e.target===document.getElementById('mmodmDel')){chiudi('mmodmDel');modmToDelete=null;}
 });
 
 
@@ -5700,4 +5729,436 @@ function setupAttachWiring(){
   if(dCan) dCan.addEventListener('click', function(){ chiudi('mattachDel'); attachToDelete=null; });
   var dOk=document.getElementById('btnAttachDelConfirm');
   if(dOk) dOk.addEventListener('click', doAttachDelete);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// MODULO M — Relazione Medica
+// Il modulo si compila a schermo, i dati restano in `moduli_m` (così è
+// riapribile e correggibile) e alla prima riuscita viene generato un PDF
+// caricato su Drive e registrato fra gli allegati della chiamata.
+// ═══════════════════════════════════════════════════════════════════
+var moduliMByCall={};        // chiamata_id -> record del modulo salvato
+var modmCallId=null;         // chiamata su cui si sta lavorando
+var modmSnapshot='';         // fotografia dei dati all'apertura (per rilevare modifiche)
+var modmSegni=[];            // segni disegnati sulla figura: {t:tipo, x:%, y:%}
+var modmSegnoAttivo=null;    // segno selezionato dalla legenda
+var modmToDelete=null;
+
+// Simboli della legenda, come sul modulo cartaceo
+var MODM_SIMBOLI={
+  contusione:'≠', ferita:'//', ustione:'Ø',
+  frattura_esposta:'⚡', frattura_chiusa:'O'
+};
+
+// Sagome (fronte/retro) disegnate come SVG: nessun file esterno da caricare
+function modmFiguraSvg(){
+  var corpo=function(x){
+    return '<g transform="translate('+x+',0)" fill="none" stroke="#2a3550" stroke-width="2.2" stroke-linejoin="round">'
+      +'<ellipse cx="60" cy="26" rx="20" ry="24"/>'
+      +'<path d="M60 50 L60 62"/>'
+      +'<path d="M28 78 C34 66 46 62 60 62 C74 62 86 66 92 78 L96 128 L86 132 L84 100 L84 168 L72 250 L60 250 L60 168"/>'
+      +'<path d="M60 168 L60 250 L48 250 L36 168 L36 100 L34 132 L24 128 L28 78 Z"/>'
+      +'<path d="M96 128 L102 172 L96 176 L88 136"/>'
+      +'<path d="M24 128 L18 172 L24 176 L32 136"/>'
+      +'</g>';
+  };
+  return '<svg viewBox="0 0 300 270" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">'
+    + corpo(10) + corpo(160) + '</svg>';
+}
+
+function modmCampi(){ return document.querySelectorAll('#modmFoglio [data-f]'); }
+
+function modmLeggiDati(){
+  var d={};
+  modmCampi().forEach(function(el){
+    var k=el.dataset.f;
+    d[k] = (el.type==='checkbox') ? !!el.checked : (el.value||'');
+  });
+  d._segni = modmSegni.slice();
+  return d;
+}
+
+function modmScriviDati(d){
+  d=d||{};
+  modmCampi().forEach(function(el){
+    var k=el.dataset.f;
+    if(el.type==='checkbox') el.checked = !!d[k];
+    else el.value = (d[k]!=null) ? d[k] : '';
+  });
+  modmSegni = Array.isArray(d._segni) ? d._segni.slice() : [];
+  modmDisegnaSegni();
+}
+
+function modmDisegnaSegni(){
+  var c=document.getElementById('modmFig');
+  if(!c)return;
+  Array.prototype.slice.call(c.querySelectorAll('.mm-segno')).forEach(function(n){ n.remove(); });
+  modmSegni.forEach(function(s,i){
+    var el=document.createElement('span');
+    el.className='mm-segno';
+    el.dataset.i=i;
+    el.style.left=s.x+'%';
+    el.style.top=s.y+'%';
+    el.textContent=MODM_SIMBOLI[s.t]||'?';
+    el.title='Tocca per rimuovere';
+    c.appendChild(el);
+  });
+}
+
+// Precompilazione dai dati della chiamata
+function modmPrecompila(callId){
+  var tr=document.querySelector('tr[data-row="'+callId+'"]');
+  var d={};
+  var oggi=new Date();
+  var p=function(n){return String(n).padStart(2,'0');};
+
+  var tsf=tr?(tr.dataset.originalTs||''):'';
+  var parts=tsf.split(/\s+/);
+  d.data = parts[0] ? parts[0].slice(0,5) : (p(oggi.getDate())+'/'+p(oggi.getMonth()+1));
+  d.anno = parts[0] ? parts[0].slice(-2) : String(oggi.getFullYear()).slice(-2);
+  d.ora  = parts[1] || '';
+  d.arrivo_ore = parts[1] || '';
+
+  d.medico = currentUser ? (currentUser.full_name||'') : '';
+  d.esito_firma = d.medico;
+  d.regione = 'Lazio';
+
+  var post = tr ? (tr.querySelector('.ptag') ? (tr.querySelector('.ptag').dataset.nome||'') : '') : '';
+  d.sede = post;
+  d.tipo_domiciliare = true;
+
+  // Dalla descrizione: indirizzo, telefono a parte, nome ed età se riconoscibili
+  var testo = tr ? getCellTextNoBadge(tr,'descrizione') : '';
+  var righe = testo.split('\n').map(function(r){return r.trim();}).filter(Boolean);
+  var indir = findAddressesInText(testo);
+  if(indir.length){
+    d.localita = indir[0].text;
+    d.ass_indirizzo = indir[0].text;
+    var cap = indir[0].text.match(/\b(\d{5})\b/);
+    if(cap) d.ass_cap = cap[1];
+    var com = capFromTable(indir[0].text);
+    if(com){
+      for(var k in CAP_COMUNI){
+        if(CAP_COMUNI.hasOwnProperty(k) && CAP_COMUNI[k]===com && indir[0].text.toLowerCase().indexOf(k)!==-1){
+          d.ass_comune = k.replace(/(^|\s)\S/g,function(t){return t.toUpperCase();});
+          break;
+        }
+      }
+    }
+  }
+  // Riga con nome ed età: es. "MARIO ROSSI 50AA" oppure "Mario Rossi 71"
+  for(var i=0;i<righe.length;i++){
+    var m=righe[i].match(/^([A-Za-zÀ-ÿ'\.\s]{5,50}?)[\s,\.]+(\d{1,3})\s*(?:aa|anni)?\b/i);
+    if(m && !/^(via|viale|piazza|corso|largo|vicolo|strada|tel|cf|mail)/i.test(righe[i])){
+      d.ass_nome = m[1].trim();
+      d.ass_eta  = m[2];
+      break;
+    }
+  }
+  if(!d.ass_nome && righe.length>1) d.ass_nome='';
+  d.motivi = righe.length ? righe[0] : '';
+  return d;
+}
+
+function modmApri(callId){
+  modmCallId=callId;
+  var salvato = moduliMByCall[String(callId)];
+  modmSegnoAttivo=null;
+  document.querySelectorAll('#modmLegenda .mm-lg').forEach(function(b){ b.classList.remove('att'); });
+
+  var fig=document.getElementById('modmFig');
+  if(fig && !fig.dataset.pronta){
+    fig.innerHTML=modmFiguraSvg();
+    fig.dataset.pronta='1';
+  }
+
+  modmScriviDati(salvato ? (salvato.dati||{}) : modmPrecompila(callId));
+  modmSnapshot=JSON.stringify(modmLeggiDati());
+  setModalBusy('mmodm', false);
+  apri('mmodm');
+}
+
+function modmModificato(){
+  return JSON.stringify(modmLeggiDati())!==modmSnapshot;
+}
+
+// Uscita: se ci sono modifiche non salvate, chiede conferma
+function modmChiudi(forza){
+  if(!forza && modmModificato()){ apri('mmodmExit'); return; }
+  chiudi('mmodm');
+  modmCallId=null;
+}
+
+// Prima di fotografare il foglio: le caselle disegnate via CSS e le aree di
+// testo non vengono catturate in modo affidabile, quindi le sostituisco
+// temporaneamente con elementi semplici e poi ripristino tutto.
+function modmModalitaStampa(attiva){
+  var foglio=document.getElementById('modmFoglio');
+  if(!foglio)return;
+  if(attiva){
+    foglio.querySelectorAll('input[type="checkbox"]').forEach(function(cb){
+      var s=document.createElement('span');
+      s.className='mm-print-ck';
+      s.textContent = cb.checked ? '✓' : '';
+      cb.style.display='none';
+      cb.parentNode.insertBefore(s, cb.nextSibling);
+    });
+    foglio.querySelectorAll('textarea').forEach(function(ta){
+      var d=document.createElement('div');
+      d.className='mm-print-ta';
+      d.textContent=ta.value||'';
+      d.style.minHeight=ta.offsetHeight+'px';
+      ta.style.display='none';
+      ta.parentNode.insertBefore(d, ta.nextSibling);
+    });
+    foglio.querySelectorAll('input:not([type="checkbox"])').forEach(function(i){
+      var d=document.createElement('span');
+      d.className='mm-print-in';
+      d.textContent=i.value||'';
+      d.style.width=i.offsetWidth+'px';
+      if(i.classList.contains('mm-grow')||i.classList.contains('mm-in-line')) d.style.flex=i.style.flex||'';
+      i.style.display='none';
+      i.parentNode.insertBefore(d, i.nextSibling);
+    });
+  } else {
+    foglio.querySelectorAll('.mm-print-ck,.mm-print-ta,.mm-print-in').forEach(function(n){ n.remove(); });
+    foglio.querySelectorAll('input,textarea').forEach(function(n){ n.style.display=''; });
+  }
+}
+
+// ── Salvataggio: dati nel database + PDF su Drive fra gli allegati ──
+function modmGeneraPdf(){
+  var foglio=document.getElementById('modmFoglio');
+  return loadScriptOnce('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js')
+    .then(function(){ return loadScriptOnce('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'); })
+    .then(function(){
+      if(!window.html2canvas) throw new Error('pdf_lib');
+      modmModalitaStampa(true);
+      return window.html2canvas(foglio,{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true})
+        .then(function(c){ modmModalitaStampa(false); return c; })
+        .catch(function(err){ modmModalitaStampa(false); throw err; });
+    })
+    .then(function(canvas){
+      var jsPDFctor = (window.jspdf&&window.jspdf.jsPDF) || window.jsPDF;
+      if(!jsPDFctor) throw new Error('pdf_lib');
+      var img=canvas.toDataURL('image/jpeg',0.86);
+      var pdf=new jsPDFctor({orientation:'portrait',unit:'mm',format:'a4'});
+      var pw=pdf.internal.pageSize.getWidth(), ph=pdf.internal.pageSize.getHeight();
+      var margine=6;
+      var maxW=pw-margine*2, maxH=ph-margine*2;
+      var r=Math.min(maxW/canvas.width, maxH/canvas.height);
+      var w=canvas.width*r, h=canvas.height*r;
+      pdf.addImage(img,'JPEG',(pw-w)/2,margine,w,h);
+      return pdf.output('blob');
+    });
+}
+
+function modmSalva(poiChiudi){
+  if(!modmCallId){ return Promise.resolve(false); }
+  if(!isOnline()){ fb(false,'Serve connessione','Per salvare il Modulo M serve internet.'); return Promise.resolve(false); }
+  var callId=modmCallId;
+  var dati=modmLeggiDati();
+  var esistente=moduliMByCall[String(callId)];
+
+  setModalBusy('mmodm', true, 'Preparo il documento…');
+
+  return modmGeneraPdf().then(function(blob){
+    setModalBusy('mmodm', true, 'Carico il PDF su Google Drive…');
+    var nome='Modulo M - chiamata '+callId+'.pdf';
+    var file=new File([blob], nome, {type:'application/pdf'});
+    // Sostituisce il file precedente, se c'era
+    var pulizia = (esistente && esistente.drive_file_id)
+      ? driveDelete(esistente.drive_file_id).catch(function(){})
+      : Promise.resolve();
+    return pulizia.then(function(){ return driveUpload(file); })
+      .then(function(f){ return {f:f, nome:nome, size:blob.size}; });
+  }).then(function(up){
+    setModalBusy('mmodm', true, 'Registro il modulo…');
+    // Riga negli allegati (così compare nell'elenco e fra gli allegati mail)
+    var vecchioAllegato = esistente && esistente.allegato_id;
+    var creaAllegato = sbFetch('allegati?select=id',{
+      method:'POST', prefer:'return=representation',
+      body:{ chiamata_id:callId, drive_file_id:up.f.id, file_name:up.nome,
+             mime_type:'application/pdf', size_bytes:up.size,
+             user_id: currentUser?currentUser.id:null }
+    }).then(function(r){ return r.json(); }).then(function(rows){
+      return (Array.isArray(rows)&&rows[0])?rows[0].id:null;
+    });
+    return creaAllegato.then(function(allegatoId){
+      if(vecchioAllegato){
+        return sbFetch('allegati?id=eq.'+vecchioAllegato,{method:'DELETE'})
+          .catch(function(){}).then(function(){ return {allegatoId:allegatoId, up:up}; });
+      }
+      return {allegatoId:allegatoId, up:up};
+    });
+  }).then(function(x){
+    var corpo={ chiamata_id:callId, dati:dati, drive_file_id:x.up.f.id,
+                file_name:x.up.nome, allegato_id:x.allegatoId,
+                user_id: currentUser?currentUser.id:null };
+    var req = esistente
+      ? sbFetch('moduli_m?chiamata_id=eq.'+callId,{method:'PATCH',prefer:'return=minimal',body:corpo})
+      : sbFetch('moduli_m',{method:'POST',prefer:'return=minimal',body:corpo});
+    return req.then(function(res){ if(!res.ok) throw new Error('db_'+res.status); });
+  }).then(function(){
+    setModalBusy('mmodm', false);
+    modmSnapshot=JSON.stringify(dati);
+    fb(true,'Modulo M salvato','Il PDF è stato caricato su Drive e aggiunto agli allegati della chiamata.');
+    if(poiChiudi){ chiudi('mmodm'); modmCallId=null; }
+    return caricaModuliM(getVisibleCallIds()).then(function(){
+      return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
+    }).then(function(){ loadRows(PAGE); });
+  }).catch(function(e){
+    setModalBusy('mmodm', false);
+    var em=String((e&&e.message)||'');
+    fb(false,'Salvataggio non riuscito',
+      em.indexOf('pdf_lib')!==-1 ? 'Non sono riuscito a caricare il generatore di PDF. Controlla la connessione e riprova.'
+      : 'Errore durante il salvataggio ('+em+'). Riprova.');
+    return false;
+  });
+}
+
+// ── Elenco moduli esistenti (per sapere dove mostrare la M) ──
+function caricaModuliM(callIds){
+  moduliMByCall={};
+  var ids=(callIds||[]).filter(function(x){ return x && String(x).indexOf('local_')!==0; });
+  if(!ids.length) return Promise.resolve({});
+  return sbFetch('moduli_m?chiamata_id=in.('+ids.join(',')+')&select=*')
+    .then(function(r){ return r.json(); })
+    .then(function(rows){
+      if(Array.isArray(rows)) rows.forEach(function(m){ moduliMByCall[String(m.chiamata_id)]=m; });
+      return moduliMByCall;
+    }).catch(function(){ return {}; });
+}
+
+// ── Eliminazione ──
+function modmPromptDelete(callId){
+  modmToDelete=callId;
+  setModalBusy('mmodmDel', false);
+  apri('mmodmDel');
+}
+function modmElimina(){
+  var callId=modmToDelete;
+  var m=moduliMByCall[String(callId)];
+  if(!m){ chiudi('mmodmDel'); return; }
+  if(!isOnline()){ fb(false,'Serve connessione','Impossibile eliminare offline.'); return; }
+  setModalBusy('mmodmDel', true, 'Elimino il PDF da Drive…');
+  var p = m.drive_file_id ? driveDelete(m.drive_file_id).catch(function(){}) : Promise.resolve();
+  p.then(function(){
+    setModalBusy('mmodmDel', true, 'Aggiorno gli allegati…');
+    return m.allegato_id ? sbFetch('allegati?id=eq.'+m.allegato_id,{method:'DELETE'}).catch(function(){}) : null;
+  }).then(function(){
+    return sbFetch('moduli_m?chiamata_id=eq.'+callId,{method:'DELETE'});
+  }).then(function(){
+    setModalBusy('mmodmDel', false);
+    chiudi('mmodmDel');
+    modmToDelete=null;
+    fb(true,'Modulo M eliminato','Rimosso dalla chiamata e da Google Drive.');
+    return caricaModuliM(getVisibleCallIds()).then(function(){
+      return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
+    }).then(function(){ loadRows(PAGE); });
+  }).catch(function(){
+    setModalBusy('mmodmDel', false);
+    fb(false,'Errore','Eliminazione non riuscita. Riprova.');
+  });
+}
+
+// Aggiorna il pulsante M e il link "Visualizza modulo M" nelle righe già a video,
+// senza ridisegnare la tabella (così non si perdono modifiche in corso).
+function injectModmUi(){
+  var tb=els.tbody||document.getElementById('tbody');
+  if(!tb)return;
+  tb.querySelectorAll('tr[data-row]').forEach(function(tr){
+    var id=tr.dataset.row; if(!id)return;
+    var salvato=moduliMByCall[String(id)];
+    var azioni=tr.querySelector('.sc');
+    var btn=tr.querySelector('.iho-modm');
+    var wrap=tr.querySelector('.modm-link-wrap');
+
+    if(salvato){
+      if(btn) btn.remove();                       // esiste il modulo: via il pulsante M
+      if(!wrap){
+        var dt=tr.querySelector('.dt-wrap');
+        if(dt){
+          var w=document.createElement('div');
+          w.className='modm-link-wrap';
+          w.innerHTML='<span class="modm-link" data-row="'+id+'" title="Apri il Modulo M compilato">'
+            +svgModuloM()+'Visualizza modulo M</span>'
+            +'<span class="modm-del" data-row="'+id+'" title="Elimina il Modulo M">'
+            +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>'
+            +'</span>';
+          dt.appendChild(w);
+        }
+      }
+    } else {
+      if(wrap) wrap.remove();                     // niente modulo: via il link
+      if(!btn && azioni){
+        var b=document.createElement('div');
+        b.className='iho-modm';
+        b.dataset.row=id;
+        b.title='Compila il Modulo M (Relazione Medica)';
+        b.innerHTML=svgModuloM();
+        var att=azioni.querySelector('.iho-attach');
+        if(att) azioni.insertBefore(b,att); else azioni.appendChild(b);
+      }
+    }
+  });
+}
+
+function svgModuloM(){
+  return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">'
+    +'<rect x="3" y="2.5" width="18" height="19" rx="2.5"/>'
+    +'<path d="M7.5 16.5V8.5l4.5 5 4.5-5v8" stroke-width="2.1" stroke-linejoin="round" stroke-linecap="round"/>'
+    +'</svg>';
+}
+
+// ── Collegamenti dei comandi ──
+function setupModmWiring(){
+  var cl=document.getElementById('btnModmClose');
+  if(cl) cl.addEventListener('click', function(){ modmChiudi(false); });
+  var sv=document.getElementById('btnModmSave');
+  if(sv) sv.addEventListener('click', function(){ modmSalva(false); });
+
+  var stay=document.getElementById('btnModmExitStay');
+  if(stay) stay.addEventListener('click', function(){ chiudi('mmodmExit'); });
+  var disc=document.getElementById('btnModmExitDiscard');
+  if(disc) disc.addEventListener('click', function(){ chiudi('mmodmExit'); modmChiudi(true); });
+  var svx=document.getElementById('btnModmExitSave');
+  if(svx) svx.addEventListener('click', function(){ chiudi('mmodmExit'); modmSalva(true); });
+
+  var dc=document.getElementById('btnModmDelCancel');
+  if(dc) dc.addEventListener('click', function(){ chiudi('mmodmDel'); modmToDelete=null; });
+  var dk=document.getElementById('btnModmDelConfirm');
+  if(dk) dk.addEventListener('click', modmElimina);
+
+  // Legenda: scelta del segno da apporre
+  var leg=document.getElementById('modmLegenda');
+  if(leg) leg.addEventListener('click', function(e){
+    var b=e.target.closest('.mm-lg'); if(!b)return;
+    var s=b.dataset.segno;
+    var giaAttivo=b.classList.contains('att');
+    leg.querySelectorAll('.mm-lg').forEach(function(x){ x.classList.remove('att'); });
+    if(giaAttivo){ modmSegnoAttivo=null; return; }
+    b.classList.add('att');
+    modmSegnoAttivo=s;
+  });
+
+  // Figura: apporre o rimuovere un segno
+  var fig=document.getElementById('modmFig');
+  if(fig) fig.addEventListener('click', function(e){
+    var esistente=e.target.closest('.mm-segno');
+    if(esistente){
+      modmSegni.splice(parseInt(esistente.dataset.i,10),1);
+      modmDisegnaSegni();
+      return;
+    }
+    if(!modmSegnoAttivo || modmSegnoAttivo==='cancella') return;
+    var r=fig.getBoundingClientRect();
+    modmSegni.push({
+      t: modmSegnoAttivo,
+      x: +(((e.clientX-r.left)/r.width)*100).toFixed(2),
+      y: +(((e.clientY-r.top)/r.height)*100).toFixed(2)
+    });
+    modmDisegnaSegni();
+  });
 }
