@@ -5941,7 +5941,7 @@ function modmAdattaScala(){
   for(var i=0;i<2;i++){
     var altDisp = window.innerHeight*0.98 - (barra?barra.offsetHeight:48) - 8;
     k = Math.min(largDisp/w, altDisp/h, 1);
-    if(box) box.style.width = Math.round(w*k)+'px';
+    if(box) box.style.setProperty('--modm-w', Math.round(w*k)+'px');
   }
   foglio.style.transform='scale('+k+')';
   palco.style.width  = Math.round(w*k)+'px';
