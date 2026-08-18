@@ -5775,6 +5775,7 @@ var modmSegnoAttivo=null;    // segno selezionato dalla legenda
 var modmToDelete=null;
 var modmFirma='';            // firma dell'assistito, immagine PNG in formato dati
 var modmFirmaTratti=false;   // e stato disegnato qualcosa sulla lavagna della firma
+var modmFirmaVigile=null;    // controllo periodico delle misure della lavagna
 var modmSezAperta=null;      // sezione attualmente aperta in dettaglio
 var modmSalvaPoiChiudi=false;
 var MODM_FS_BASE=12;         // corpo del testo sul foglio
@@ -6107,6 +6108,17 @@ function modmFirmaAvvia(){
   apri('mmodmFirma');
   setTimeout(modmFirmaPulisci, 40);                  // serve il modale gia disegnato
   setTimeout(modmFirmaAdatta, 400);                  // e se era nascosta, appena compare
+  clearInterval(modmFirmaVigile);
+  modmFirmaVigile=setInterval(modmFirmaVigilanza, 400);
+}
+// Tiene d'occhio le misure finche la finestra della firma e aperta, poi si spegne.
+// La verifica costa nulla: se e gia tutto a posto, modmFirmaAdatta esce subito.
+function modmFirmaVigilanza(){
+  var ov=document.getElementById('mmodmFirma');
+  if(!ov || !ov.classList.contains('open')){
+    clearInterval(modmFirmaVigile); modmFirmaVigile=null; return;
+  }
+  modmFirmaAdatta();
 }
 function modmFirmaPulisci(){
   var cv=document.getElementById('modmFirmaCanvas');
@@ -6537,6 +6549,7 @@ function modmFirmaWiring(){
   }
   cv.addEventListener('pointerdown', function(e){
     e.preventDefault();
+    modmFirmaAdatta();          // se il telefono e appena stato girato, rimette in squadra
     giu=true; ctx=cv.getContext('2d');
     try{ cv.setPointerCapture(e.pointerId); }catch(_){}
     var pt=punto(e);
