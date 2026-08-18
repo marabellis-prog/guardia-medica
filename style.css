@@ -1531,7 +1531,7 @@ body{max-width:100%;overflow-x:clip}
    MODULO M su cellulare: bersagli grandi per le dita e schermo pieno
    dove serve spazio (dettaglio di una sezione, firma in orizzontale)
 ═══════════════════════════════════════════════════════════════ */
-@media(max-width:640px){
+@media(max-width:640px),(max-height:560px){
   .mbox.modm-sez-box{
     width:100vw!important;max-width:100vw!important;
     height:100dvh!important;max-height:100dvh!important;border-radius:0!important;
@@ -1572,8 +1572,16 @@ body{max-width:100%;overflow-x:clip}
    e stretta (telefono girato). Una riga sola, altezza prevedibile. */
 .modm-box.modm-compatta .modm-title,
 .modm-box.modm-compatta .modm-stato{display:none}
-.modm-box.modm-compatta .modm-toolbar{padding:.35rem .4rem;flex-wrap:nowrap}
-.modm-box.modm-compatta .modm-actions{width:100%;justify-content:space-between;flex-wrap:nowrap;gap:4px}
+/* Altezza bloccata: cosi l'altezza della barra e un numero certo e il calcolo
+   di quanto rimpicciolire il foglio non puo piu rincorrersi. */
+.modm-box.modm-compatta .modm-toolbar{
+  padding:.3rem .35rem;flex-wrap:nowrap;
+  height:40px;min-height:40px;max-height:40px;overflow:hidden;align-items:center;
+}
+.modm-box.modm-compatta .modm-actions{
+  width:100%;justify-content:space-between;flex-wrap:nowrap;gap:4px;
+  overflow-x:auto;-webkit-overflow-scrolling:touch;
+}
 .modm-box.modm-compatta .modm-actions button{
   padding:0 8px;font-size:.74rem;min-height:34px;white-space:nowrap;
 }
