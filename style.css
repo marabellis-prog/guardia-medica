@@ -1503,9 +1503,11 @@ body{max-width:100%;overflow-x:clip}
 .mm-dettaglio .mm-head-l .mm-in{max-width:340px}
 
 /* La barra dei comandi non deve allargare la finestra oltre il foglio */
-.modm-toolbar{flex-wrap:wrap;row-gap:6px}
-.modm-title{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mbox.modm-box{min-width:0}
+.modm-toolbar{flex-wrap:wrap;row-gap:6px;min-width:0}
+.modm-actions{flex-wrap:wrap;min-width:0;justify-content:flex-end}
+.modm-title{flex:1 1 110px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 @media(max-width:560px){
   #mmodm .modm-title{display:none}
-  .modm-actions{width:100%;justify-content:flex-end}
+  .modm-actions{width:100%}
 }
