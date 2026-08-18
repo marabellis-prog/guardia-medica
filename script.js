@@ -5896,7 +5896,10 @@ function modmChiudi(forza){
 function modmModalitaStampa(attiva){
   var foglio=document.getElementById('modmFoglio');
   if(!foglio)return;
+  var scroll=document.querySelector('.modm-scroll');
   if(attiva){
+    foglio.classList.add('mm-stampa');
+    if(scroll) scroll.style.background='#fff';      // niente bande grigie nella cattura
     foglio.querySelectorAll('input[type="checkbox"]').forEach(function(cb){
       var s=document.createElement('span');
       s.className='mm-print-ck';
@@ -5922,6 +5925,8 @@ function modmModalitaStampa(attiva){
       i.parentNode.insertBefore(d, i.nextSibling);
     });
   } else {
+    foglio.classList.remove('mm-stampa');
+    if(scroll) scroll.style.background='';
     foglio.querySelectorAll('.mm-print-ck,.mm-print-ta,.mm-print-in').forEach(function(n){ n.remove(); });
     foglio.querySelectorAll('input,textarea').forEach(function(n){ n.style.display=''; });
   }
