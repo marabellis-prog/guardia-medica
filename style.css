@@ -1075,3 +1075,34 @@ body{max-width:100%;overflow-x:clip}
 @media(hover:none){
   .ph-link,.addr-link,.mail-link{margin:0 4px}
 }
+
+/* ═══════════════════════════════════════
+   MAIL — allegati già presenti nella chiamata (selezionabili)
+═══════════════════════════════════════ */
+.mail-exist-list{display:flex;flex-direction:column;gap:.4rem;max-height:30vh;overflow-y:auto}
+.mail-exist-item{
+  display:flex;align-items:center;gap:.6rem;
+  padding:.55rem .7rem;border-radius:var(--r2);
+  background:var(--surface2);border:1px solid var(--bord);
+  cursor:pointer;transition:all var(--tr);
+}
+.mail-exist-item:hover{border-color:var(--pr);background:var(--surface)}
+.mail-exist-item input[type="checkbox"]{
+  width:20px;height:20px;flex-shrink:0;cursor:pointer;
+  accent-color:var(--pr);margin:0;
+}
+.mail-exist-item svg{color:var(--pr);flex-shrink:0;opacity:.85}
+.mail-exist-name{
+  flex:1;min-width:0;font-size:.88rem;font-weight:500;color:var(--tx);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.mail-exist-size{font-size:.76rem;color:var(--txm);flex-shrink:0}
+/* Selezionato: evidenziato */
+.mail-exist-item:has(input:checked){
+  border-color:var(--pr);background:var(--prl);
+}
+.mail-exist-item:has(input:checked) .mail-exist-name{color:var(--pr);font-weight:600}
+@media(hover:none){
+  .mail-exist-item{padding:.7rem}
+  .mail-exist-item input[type="checkbox"]{width:22px;height:22px}
+}
