@@ -5897,6 +5897,9 @@ function modmModalitaStampa(attiva){
   var foglio=document.getElementById('modmFoglio');
   if(!foglio)return;
   var scroll=document.querySelector('.modm-scroll');
+  // Pulizia preventiva: evita doppioni se la modalita era rimasta attiva
+  foglio.querySelectorAll('.mm-print-ck,.mm-print-ta,.mm-print-in').forEach(function(n){ n.remove(); });
+  foglio.querySelectorAll('input,textarea').forEach(function(n){ n.style.display=''; });
   if(attiva){
     foglio.classList.add('mm-stampa');
     if(scroll) scroll.style.background='#fff';      // niente bande grigie nella cattura
@@ -5940,7 +5943,12 @@ function modmGeneraPdf(){
     .then(function(){
       if(!window.html2canvas) throw new Error('pdf_lib');
       modmModalitaStampa(true);
-      return window.html2canvas(foglio,{scale:2,backgroundColor:'#ffffff',logging:false,useCORS:true})
+      return window.html2canvas(foglio,{
+        scale:2, backgroundColor:'#ffffff', logging:false, useCORS:true,
+        width:foglio.scrollWidth, height:foglio.scrollHeight,
+        windowWidth:foglio.scrollWidth, windowHeight:foglio.scrollHeight,
+        scrollX:0, scrollY:0, x:0, y:0
+      })
         .then(function(c){ modmModalitaStampa(false); return c; })
         .catch(function(err){ modmModalitaStampa(false); throw err; });
     })
