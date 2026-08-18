@@ -6129,10 +6129,10 @@ function modmFirmaPulisci(){
 }
 // La lavagna prende le proporzioni esatte dello spazio che la firma avra sul
 // modulo: quello che si disegna e quello che si vedra stampato, senza schiacciature.
-function modmDimensionaLavagna(cv){
+function modmMisureLavagna(){
   var slot=document.getElementById('modmFirmaSlot');
-  var guscio=cv.parentNode ? cv.parentNode.parentNode : null;
-  if(!slot || !guscio) return;
+  var guscio=document.querySelector('#mmodmFirma .modm-firma-guscio');
+  if(!slot || !guscio) return null;
   var rapporto = (slot.offsetWidth && slot.offsetHeight) ? (slot.offsetWidth/slot.offsetHeight) : 6.7;
   var cs=getComputedStyle(guscio);
   var largh = guscio.clientWidth - (parseFloat(cs.paddingLeft)||0) - (parseFloat(cs.paddingRight)||0) - 4;
@@ -6141,8 +6141,12 @@ function modmDimensionaLavagna(cv){
   // Non deve sfondare l'altezza disponibile nella finestra
   var altMax = Math.max(90, window.innerHeight*0.52);
   if(alt>altMax){ alt=altMax; largh=alt*rapporto; }
-  cv.style.width  = Math.round(largh)+'px';
-  cv.style.height = Math.round(alt)+'px';
+  return { largh:Math.round(largh), alt:Math.round(alt) };
+}
+function modmDimensionaLavagna(cv){
+  var m=modmMisureLavagna(); if(!m) return;
+  cv.style.width  = m.largh+'px';
+  cv.style.height = m.alt+'px';
 }
 
 // Girando il telefono la lavagna cambia misura. Se e stata aperta con lo
@@ -6155,6 +6159,8 @@ function modmFirmaAdatta(){
   var area=document.getElementById('modmFirmaArea');
   if(!cv || !area || !area.offsetWidth) return;      // ancora nascosta
   var dpr=window.devicePixelRatio||1;
+  var attesa=modmMisureLavagna();
+  if(attesa && cv.width===Math.round(attesa.largh*dpr) && cv.height===Math.round(attesa.alt*dpr)) return;
   // conserva quel che era gia stato disegnato
   var vecchio=null;
   if(modmFirmaTratti && cv.width && cv.height){
@@ -6550,6 +6556,17 @@ function modmFirmaWiring(){
   ['pointerup','pointercancel','pointerleave'].forEach(function(ev){
     cv.addEventListener(ev, function(){ giu=false; });
   });
+
+  // Girando il telefono, o quando la lavagna passa da nascosta a visibile,
+  // le misure cambiano: me ne accorgo guardando l'elemento, non aspettando eventi.
+  var area=document.getElementById('modmFirmaArea');
+  if(area && window.ResizeObserver){
+    var attesa=null;
+    new ResizeObserver(function(){
+      clearTimeout(attesa);
+      attesa=setTimeout(modmFirmaAdatta, 80);
+    }).observe(area);
+  }
 }
 
 // ── Collegamenti dei comandi ──
