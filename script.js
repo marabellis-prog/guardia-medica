@@ -3384,7 +3384,26 @@ function escAttr(s){
 // MODAL CLICK OVERLAY
 // ═══════════════════════════════════════════════════════════════════
 
+// Il "click sullo sfondo" chiude il modal SOLO se il gesto inizia e finisce
+// davvero sullo sfondo. Senza questo controllo, selezionando del testo dentro al
+// modal e rilasciando il mouse appena fuori, il browser genera comunque un click
+// sullo sfondo e la finestra si chiudeva a sorpresa.
+var _pressStart=null, _pressEnd=null;
+document.addEventListener('pointerdown',function(e){ _pressStart=e.target; },true);
+document.addEventListener('pointerup',  function(e){ _pressEnd=e.target;   },true);
+document.addEventListener('mousedown',  function(e){ _pressStart=e.target; },true);
+document.addEventListener('mouseup',    function(e){ _pressEnd=e.target;   },true);
+function chiusuraDaSfondoValida(overlay){
+  if(!overlay)return false;
+  if(_pressStart && _pressStart!==overlay) return false;  // gesto iniziato DENTRO
+  if(_pressEnd   && _pressEnd  !==overlay) return false;  // gesto finito DENTRO
+  return true;
+}
+
 document.addEventListener('click',function(e){
+  // Ignora i click "trascinati" da dentro il modal verso l'esterno
+  if(e.target && e.target.classList && e.target.classList.contains('mov')
+     && !chiusuraDaSfondoValida(e.target)) return;
   if(e.target===document.getElementById('mfb'))chiudi('mfb');
   if(e.target===document.getElementById('mcnf'))chiudi('mcnf');
   if(e.target===document.getElementById('munsav1'))chiudi('munsav1');
