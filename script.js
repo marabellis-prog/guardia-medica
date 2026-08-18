@@ -5893,6 +5893,29 @@ function modmChiudi(forza){
 // Prima di fotografare il foglio: le caselle disegnate via CSS e le aree di
 // testo non vengono catturate in modo affidabile, quindi le sostituisco
 // temporaneamente con elementi semplici e poi ripristino tutto.
+// Per la fotografia il foglio viene tolto dal contenitore con scorrimento e
+// appoggiato su un fondo bianco fuori schermo: cosi nessun antenato lo taglia
+// ne gli lascia dietro bande grigie.
+var modmFoglioPosto=null;
+function modmSollevaFoglio(foglio){
+  if(modmFoglioPosto) return;
+  modmFoglioPosto={padre:foglio.parentNode, prima:foglio.nextSibling};
+  var w=document.getElementById('modmCapture');
+  if(!w){
+    w=document.createElement('div');
+    w.id='modmCapture';
+    document.body.appendChild(w);
+  }
+  w.setAttribute('style','position:absolute;top:0;left:-20000px;width:964px;background:#fff;padding:0;margin:0;z-index:0;pointer-events:none');
+  w.appendChild(foglio);
+}
+function modmRiponiFoglio(foglio){
+  if(!modmFoglioPosto) return;
+  var p=modmFoglioPosto; modmFoglioPosto=null;
+  try{ p.padre.insertBefore(foglio, p.prima); }catch(_){ try{ p.padre.appendChild(foglio); }catch(__){} }
+  var w=document.getElementById('modmCapture');
+  if(w && w.parentNode) w.parentNode.removeChild(w);
+}
 function modmModalitaStampa(attiva){
   var foglio=document.getElementById('modmFoglio');
   if(!foglio)return;
@@ -5900,9 +5923,11 @@ function modmModalitaStampa(attiva){
   // Pulizia preventiva: evita doppioni se la modalita era rimasta attiva
   foglio.querySelectorAll('.mm-print-ck,.mm-print-ta,.mm-print-in').forEach(function(n){ n.remove(); });
   foglio.querySelectorAll('input,textarea').forEach(function(n){ n.style.display=''; });
+  modmRiponiFoglio(foglio);
   if(attiva){
     foglio.classList.add('mm-stampa');
     if(scroll) scroll.style.background='#fff';      // niente bande grigie nella cattura
+    modmSollevaFoglio(foglio);
     foglio.querySelectorAll('input[type="checkbox"]').forEach(function(cb){
       var s=document.createElement('span');
       s.className='mm-print-ck';
@@ -5944,10 +5969,7 @@ function modmGeneraPdf(){
       if(!window.html2canvas) throw new Error('pdf_lib');
       modmModalitaStampa(true);
       return window.html2canvas(foglio,{
-        scale:2, backgroundColor:'#ffffff', logging:false, useCORS:true,
-        width:foglio.scrollWidth, height:foglio.scrollHeight,
-        windowWidth:foglio.scrollWidth, windowHeight:foglio.scrollHeight,
-        scrollX:0, scrollY:0, x:0, y:0
+        scale:2, backgroundColor:'#ffffff', logging:false, useCORS:true, removeContainer:true
       })
         .then(function(c){ modmModalitaStampa(false); return c; })
         .catch(function(err){ modmModalitaStampa(false); throw err; });
