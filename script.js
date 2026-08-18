@@ -6106,6 +6106,7 @@ function modmFirmaApri(){
 function modmFirmaAvvia(){
   apri('mmodmFirma');
   setTimeout(modmFirmaPulisci, 40);                  // serve il modale gia disegnato
+  setTimeout(modmFirmaAdatta, 400);                  // e se era nascosta, appena compare
 }
 function modmFirmaPulisci(){
   var cv=document.getElementById('modmFirmaCanvas');
@@ -6142,6 +6143,35 @@ function modmDimensionaLavagna(cv){
   if(alt>altMax){ alt=altMax; largh=alt*rapporto; }
   cv.style.width  = Math.round(largh)+'px';
   cv.style.height = Math.round(alt)+'px';
+}
+
+// Girando il telefono la lavagna cambia misura. Se e stata aperta con lo
+// schermo in piedi non era nemmeno visibile, quindi non aveva misure: senza
+// questo ritocco resterebbe piccola e il dito scriverebbe fuori posto.
+function modmFirmaAdatta(){
+  var ov=document.getElementById('mmodmFirma');
+  if(!ov || !ov.classList.contains('open')) return;
+  var cv=document.getElementById('modmFirmaCanvas');
+  var area=document.getElementById('modmFirmaArea');
+  if(!cv || !area || !area.offsetWidth) return;      // ancora nascosta
+  var dpr=window.devicePixelRatio||1;
+  // conserva quel che era gia stato disegnato
+  var vecchio=null;
+  if(modmFirmaTratti && cv.width && cv.height){
+    vecchio=document.createElement('canvas');
+    vecchio.width=cv.width; vecchio.height=cv.height;
+    vecchio.getContext('2d').drawImage(cv,0,0);
+  }
+  var eraFirmato=modmFirmaTratti;
+  modmFirmaPulisci();
+  if(vecchio){
+    // le proporzioni non cambiano, quindi il disegno si riadatta senza deformarsi
+    cv.getContext('2d').drawImage(vecchio, 0, 0, cv.width/dpr, cv.height/dpr);
+    modmFirmaTratti=eraFirmato;
+    area.classList.add('ha-firma');
+    var hint=document.getElementById('modmFirmaHint');
+    if(hint) hint.style.visibility='hidden';
+  }
 }
 
 // Ritaglio attorno all'inchiostro: cosi la firma riempie bene il suo spazio sul foglio
@@ -6575,8 +6605,11 @@ function setupModmWiring(){
     if(!document.getElementById('mmodm').classList.contains('open')) return;
     modmAdattaScala();
   };
-  window.addEventListener('resize', ridisegna);
-  window.addEventListener('orientationchange', function(){ setTimeout(ridisegna,250); });
+  window.addEventListener('resize', function(){ ridisegna(); modmFirmaAdatta(); });
+  window.addEventListener('orientationchange', function(){
+    setTimeout(function(){ ridisegna(); modmFirmaAdatta(); }, 250);
+    setTimeout(modmFirmaAdatta, 650);        // alcuni telefoni assestano le misure con calma
+  });
 
   var stay=document.getElementById('btnModmExitStay');
   if(stay) stay.addEventListener('click', function(){ chiudi('mmodmExit'); });
