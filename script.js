@@ -3455,6 +3455,10 @@ document.addEventListener('click',function(e){
   if(e.target===document.getElementById('mcap'))closeCapMismatch(); // = Mantieni
   if(e.target===document.getElementById('mmodm'))modmChiudi(false);
   if(e.target===document.getElementById('mmodmDel')){chiudi('mmodmDel');modmToDelete=null;}
+  if(e.target===document.getElementById('mmodmSez'))modmChiudiSezione();
+  if(e.target===document.getElementById('mmodmFirma'))modmFirmaConferma();
+  if(e.target===document.getElementById('mmodmFirmaWarn'))chiudi('mmodmFirmaWarn');
+  if(e.target===document.getElementById('mmodmSalva'))chiudi('mmodmSalva');
 });
 
 
@@ -5744,6 +5748,12 @@ var modmSnapshot='';         // fotografia dei dati all'apertura (per rilevare m
 var modmSegni=[];            // segni disegnati sulla figura: {t:tipo, x:%, y:%}
 var modmSegnoAttivo=null;    // segno selezionato dalla legenda
 var modmToDelete=null;
+var modmFirma='';            // firma dell'assistito, immagine PNG in formato dati
+var modmFirmaTratti=false;   // e stato disegnato qualcosa sulla lavagna della firma
+var modmSezAperta=null;      // sezione attualmente aperta in dettaglio
+var modmSalvaPoiChiudi=false;
+var MODM_FS_BASE=12;         // corpo del testo sul foglio
+var MODM_FS_MIN=8;           // sotto questa misura non si scende: resterebbe illeggibile
 
 // Simboli della legenda, come sul modulo cartaceo
 var MODM_SIMBOLI={
@@ -5767,7 +5777,12 @@ function modmFiguraSvg(){
     + corpo(10) + corpo(160) + '</svg>';
 }
 
-function modmCampi(){ return document.querySelectorAll('#modmFoglio [data-f]'); }
+function modmCampi(){
+  // Una sezione in compilazione e temporaneamente fuori dal foglio: va letta lo stesso
+  var a=Array.prototype.slice.call(document.querySelectorAll('#modmFoglio [data-f]'));
+  var b=Array.prototype.slice.call(document.querySelectorAll('#modmSezCorpo [data-f]'));
+  return a.concat(b);
+}
 
 function modmLeggiDati(){
   var d={};
@@ -5776,6 +5791,7 @@ function modmLeggiDati(){
     d[k] = (el.type==='checkbox') ? !!el.checked : (el.value||'');
   });
   d._segni = modmSegni.slice();
+  d._firma = modmFirma || '';
   return d;
 }
 
@@ -5788,6 +5804,9 @@ function modmScriviDati(d){
   });
   modmSegni = Array.isArray(d._segni) ? d._segni.slice() : [];
   modmDisegnaSegni();
+  modmFirma = d._firma || '';
+  modmMostraFirma();
+  modmCampi().forEach(function(el){ if(el.type!=='checkbox') el.dataset.prec=el.value||''; });
 }
 
 function modmDisegnaSegni(){
@@ -5874,9 +5893,231 @@ function modmApri(callId){
   }
 
   modmScriviDati(salvato ? (salvato.dati||{}) : modmPrecompila(callId));
+
+  // Il foglio a schermo non si compila: si guarda e si aprono le sezioni.
+  // Se e gia stato firmato, e congelato: nemmeno le sezioni si aprono.
+  var congelato = !!(salvato && salvato.firmato);
+  var foglio=document.getElementById('modmFoglio');
+  if(foglio){
+    foglio.classList.add('mm-sola-lettura');
+    foglio.classList.toggle('mm-congelato', congelato);
+  }
+  var bf=document.getElementById('btnModmFirma'), bs=document.getElementById('btnModmSave');
+  if(bf) bf.style.display = congelato ? 'none' : '';
+  if(bs) bs.style.display = congelato ? 'none' : '';
+
   modmSnapshot=JSON.stringify(modmLeggiDati());
   setModalBusy('mmodm', false);
   apri('mmodm');
+  modmMisuraCampi();
+  modmAdattaTutti();
+  modmAdattaScala();
+  modmAggiornaStato();
+}
+
+// Etichetta di stato nella barra: bozza modificabile oppure documento firmato
+function modmAggiornaStato(){
+  var e=document.getElementById('modmStato'); if(!e)return;
+  var salvato=moduliMByCall[String(modmCallId)];
+  var congelato=!!(salvato && salvato.firmato);
+  e.className='modm-stato '+(congelato?'firmato':'bozza');
+  e.textContent = congelato ? 'Firmato' : (modmFirma ? 'Firma apposta' : 'Bozza');
+}
+
+// ── Il foglio intero deve stare a schermo: lo rimpicciolisco quel tanto che basta ──
+function modmAdattaScala(){
+  var palco=document.getElementById('modmPalco');
+  var foglio=document.getElementById('modmFoglio');
+  var barra=document.querySelector('#mmodm .modm-toolbar');
+  if(!palco || !foglio) return;
+  foglio.style.transform='none';
+  var w=foglio.offsetWidth, h=foglio.offsetHeight;
+  if(!w || !h) return;
+  var box=document.querySelector('#mmodm .modm-box');
+  var largDisp = Math.min(window.innerWidth*0.98, window.innerWidth-10);
+  var k=1;
+  // Due passate: stringendo la finestra la barra dei comandi puo andare a capo
+  // e cambiare altezza, quindi la misura va ripresa.
+  for(var i=0;i<2;i++){
+    var altDisp = window.innerHeight*0.98 - (barra?barra.offsetHeight:48) - 8;
+    k = Math.min(largDisp/w, altDisp/h, 1);
+    if(box) box.style.width = Math.round(w*k)+'px';
+  }
+  foglio.style.transform='scale('+k+')';
+  palco.style.width  = Math.round(w*k)+'px';
+  palco.style.height = Math.round(h*k)+'px';
+}
+
+// ── Campi a misura fissa: il testo rimpicciolisce fino a un minimo, poi si ferma ──
+var _modmCtx=null;
+function modmCtx(){
+  if(!_modmCtx) _modmCtx=document.createElement('canvas').getContext('2d');
+  return _modmCtx;
+}
+// Larghezza (e righe) che ogni campo ha sulla carta: misurate una volta sola,
+// cosi restano il vincolo anche quando il campo e ingrandito in dettaglio.
+function modmMisuraCampi(){
+  var f=document.getElementById('modmFoglio'); if(!f)return;
+  f.querySelectorAll('input[data-f]').forEach(function(el){
+    if(el.type==='checkbox' || el.dataset.wpaper) return;
+    var cs=getComputedStyle(el);
+    var w=el.clientWidth - (parseFloat(cs.paddingLeft)||0) - (parseFloat(cs.paddingRight)||0);
+    if(w>4) el.dataset.wpaper=String(Math.floor(w));
+  });
+  f.querySelectorAll('textarea[data-f]').forEach(function(el){
+    if(el.dataset.wpaper) return;
+    var cs=getComputedStyle(el);
+    var w=el.clientWidth - (parseFloat(cs.paddingLeft)||0) - (parseFloat(cs.paddingRight)||0);
+    var passo=parseFloat(cs.lineHeight)||20;
+    var righe=Math.max(1, Math.floor(el.clientHeight/passo));
+    if(w>4){ el.dataset.wpaper=String(Math.floor(w)); el.dataset.righe=String(righe); }
+  });
+}
+// Quante righe occuperebbe il testo, alla larghezza della carta e a quel corpo
+function modmRigheTesto(testo,largh,fs){
+  var c=modmCtx(); c.font='400 '+fs+'px Arial, Helvetica, sans-serif';
+  var tot=0;
+  testo.split('\n').forEach(function(par){
+    if(!par){ tot+=1; return; }
+    var parole=par.split(/\s+/), riga='', righe=1;
+    for(var i=0;i<parole.length;i++){
+      var prova = riga ? riga+' '+parole[i] : parole[i];
+      if(!riga || c.measureText(prova).width<=largh){ riga=prova; }
+      else { righe++; riga=parole[i]; }
+    }
+    tot+=righe;
+  });
+  return tot;
+}
+// Ritorna false se il testo non ci sta nemmeno al corpo minimo
+function modmAdattaCampo(el){
+  if(!el || el.type==='checkbox' || !el.dataset || !el.dataset.f) return true;
+  var largh=parseFloat(el.dataset.wpaper||0);
+  if(!largh) return true;
+  var testo=el.value||'';
+  // In dettaglio il campo e ingrandito per comodita: il vincolo resta quello
+  // della carta, ma il corpo del testo lo decide il foglio di stile.
+  var inDettaglio = !!(el.closest && el.closest('#modmSezCorpo'));
+  var fs, ok=false;
+  if(el.tagName==='TEXTAREA'){
+    var maxRighe=parseInt(el.dataset.righe||'4',10);
+    for(fs=MODM_FS_BASE; fs>=MODM_FS_MIN; fs-=0.5){
+      if(modmRigheTesto(testo,largh,fs)<=maxRighe){ ok=true; break; }
+    }
+  } else {
+    var c=modmCtx();
+    for(fs=MODM_FS_BASE; fs>=MODM_FS_MIN; fs-=0.5){
+      c.font='400 '+fs+'px Arial, Helvetica, sans-serif';
+      if(c.measureText(testo).width<=largh){ ok=true; break; }
+    }
+  }
+  if(!ok) return false;
+  if(inDettaglio) el.style.fontSize='';
+  else el.style.fontSize=fs+'px';
+  return true;
+}
+function modmAdattaTutti(){ modmCampi().forEach(modmAdattaCampo); }
+
+// Digitando: se si supera lo spazio disponibile sulla carta, il testo non entra
+function modmGuardiaInput(el){
+  if(!el || !el.dataset || !el.dataset.f || el.type==='checkbox') return;
+  if(modmAdattaCampo(el)){ el.dataset.prec = el.value; return; }
+  el.value = (el.dataset.prec!=null) ? el.dataset.prec : '';
+  modmAdattaCampo(el);
+  el.classList.add('mm-pieno');
+  setTimeout(function(){ el.classList.remove('mm-pieno'); }, 450);
+}
+
+// ── Compilazione per sezioni ──
+function modmApriSezione(nodo){
+  if(!nodo || modmSezAperta) return;
+  var corpo=document.getElementById('modmSezCorpo'); if(!corpo) return;
+  // Un segnaposto delle stesse misure tiene ferma l'impaginazione del foglio
+  var seg=document.createElement('div');
+  seg.className='mm-segnaposto';
+  seg.style.width=nodo.offsetWidth+'px';
+  seg.style.height=nodo.offsetHeight+'px';
+  seg.style.flex='0 0 auto';
+  modmSezAperta={nodo:nodo, padre:nodo.parentNode, seg:seg};
+  nodo.parentNode.insertBefore(seg, nodo);
+  corpo.innerHTML='';
+  corpo.appendChild(nodo);
+  nodo.classList.add('mm-dettaglio');
+  var t=document.getElementById('modmSezTit');
+  if(t) t.textContent = nodo.dataset.sezTit || 'Sezione';
+  apri('mmodmSez');
+}
+function modmChiudiSezione(){
+  var x=modmSezAperta; if(!x) return;
+  modmSezAperta=null;
+  x.nodo.classList.remove('mm-dettaglio');
+  try{ x.padre.insertBefore(x.nodo, x.seg); }catch(_){ try{ x.padre.appendChild(x.nodo); }catch(__){} }
+  if(x.seg.parentNode) x.seg.parentNode.removeChild(x.seg);
+  chiudi('mmodmSez');
+  modmAdattaTutti();
+  modmAdattaScala();
+  modmAggiornaStato();
+}
+
+// ── Firma dell'assistito ──
+function modmMostraFirma(){
+  var box=document.getElementById('modmFirmaBox'), img=document.getElementById('modmFirmaImg');
+  if(!box || !img) return;
+  if(modmFirma){ img.src=modmFirma; box.classList.add('ha-firma'); }
+  else { img.removeAttribute('src'); box.classList.remove('ha-firma'); }
+}
+function modmFirmaApri(){
+  if(modmFirma){ apri('mmodmFirmaWarn'); return; }   // rifarla cancella quella attuale
+  modmFirmaAvvia();
+}
+function modmFirmaAvvia(){
+  apri('mmodmFirma');
+  setTimeout(modmFirmaPulisci, 40);                  // serve il modale gia disegnato
+}
+function modmFirmaPulisci(){
+  var cv=document.getElementById('modmFirmaCanvas');
+  var area=document.getElementById('modmFirmaArea');
+  if(!cv || !area) return;
+  var r=cv.getBoundingClientRect();
+  if(!r.width) return;
+  var dpr=window.devicePixelRatio||1;
+  cv.width=Math.round(r.width*dpr);
+  cv.height=Math.round(r.height*dpr);
+  var ctx=cv.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,r.width,r.height);
+  ctx.lineWidth=2.4; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#12203f';
+  area.classList.remove('ha-firma');
+  modmFirmaTratti=false;
+}
+// Ritaglio attorno all'inchiostro: cosi la firma riempie bene il suo spazio sul foglio
+function modmRitagliaFirma(){
+  var cv=document.getElementById('modmFirmaCanvas');
+  if(!cv || !cv.width) return '';
+  var ctx=cv.getContext('2d');
+  var dati=ctx.getImageData(0,0,cv.width,cv.height).data;
+  var x0=cv.width, y0=cv.height, x1=-1, y1=-1;
+  for(var y=0;y<cv.height;y++){
+    for(var x=0;x<cv.width;x++){
+      if(dati[(y*cv.width+x)*4+3]>12){
+        if(x<x0)x0=x; if(x>x1)x1=x; if(y<y0)y0=y; if(y>y1)y1=y;
+      }
+    }
+  }
+  if(x1<0) return '';
+  var m=Math.round(6*(window.devicePixelRatio||1));
+  x0=Math.max(0,x0-m); y0=Math.max(0,y0-m);
+  x1=Math.min(cv.width-1,x1+m); y1=Math.min(cv.height-1,y1+m);
+  var w=x1-x0+1, h=y1-y0+1;
+  var out=document.createElement('canvas'); out.width=w; out.height=h;
+  out.getContext('2d').drawImage(cv,x0,y0,w,h,0,0,w,h);
+  return out.toDataURL('image/png');
+}
+function modmFirmaConferma(){
+  modmFirma = modmFirmaTratti ? modmRitagliaFirma() : '';
+  modmMostraFirma();
+  chiudi('mmodmFirma');
+  modmAggiornaStato();
 }
 
 function modmModificato(){
@@ -5885,7 +6126,10 @@ function modmModificato(){
 
 // Uscita: se ci sono modifiche non salvate, chiede conferma
 function modmChiudi(forza){
-  if(!forza && modmModificato()){ apri('mmodmExit'); return; }
+  if(modmSezAperta){ modmChiudiSezione(); return; }
+  var salvato=moduliMByCall[String(modmCallId)];
+  var congelato=!!(salvato && salvato.firmato);
+  if(!forza && !congelato && modmModificato()){ apri('mmodmExit'); return; }
   chiudi('mmodm');
   modmCallId=null;
 }
@@ -5899,7 +6143,10 @@ function modmChiudi(forza){
 var modmFoglioPosto=null;
 function modmSollevaFoglio(foglio){
   if(modmFoglioPosto) return;
-  modmFoglioPosto={padre:foglio.parentNode, prima:foglio.nextSibling};
+  modmFoglioPosto={padre:foglio.parentNode, prima:foglio.nextSibling,
+                   trasf:foglio.style.transform, posiz:foglio.style.position};
+  foglio.style.transform='none';        // si fotografa a grandezza naturale
+  foglio.style.position='static';
   var w=document.getElementById('modmCapture');
   if(!w){
     w=document.createElement('div');
@@ -5912,6 +6159,8 @@ function modmSollevaFoglio(foglio){
 function modmRiponiFoglio(foglio){
   if(!modmFoglioPosto) return;
   var p=modmFoglioPosto; modmFoglioPosto=null;
+  foglio.style.transform=p.trasf||'';
+  foglio.style.position=p.posiz||'';
   try{ p.padre.insertBefore(foglio, p.prima); }catch(_){ try{ p.padre.appendChild(foglio); }catch(__){} }
   var w=document.getElementById('modmCapture');
   if(w && w.parentNode) w.parentNode.removeChild(w);
@@ -5989,17 +6238,27 @@ function modmGeneraPdf(){
     });
 }
 
-function modmSalva(poiChiudi){
-  if(!modmCallId){ return Promise.resolve(false); }
-  if(!isOnline()){ fb(false,'Serve connessione','Per salvare il Modulo M serve internet.'); return Promise.resolve(false); }
-  var callId=modmCallId;
-  var dati=modmLeggiDati();
-  var esistente=moduliMByCall[String(callId)];
+// Chiede conferma spiegando che cosa comporta il salvataggio: senza firma
+// il modulo resta una bozza correggibile, con la firma si chiude per sempre.
+function modmChiediSalva(poiChiudi){
+  if(!modmCallId) return;
+  modmSalvaPoiChiudi=!!poiChiudi;
+  var conFirma=!!modmFirma;
+  var t=document.getElementById('mmodmSalvaTit');
+  var m=document.getElementById('mmodmSalvaMsg');
+  var b=document.getElementById('btnModmSalvaSi');
+  if(t) t.textContent = conFirma ? 'Chiudere il modulo con la firma?' : 'Salvare la bozza?';
+  if(m) m.innerHTML = conFirma
+    ? 'C&rsquo;&egrave; la firma dell&rsquo;assistito: il modulo verr&agrave; <b>chiuso e non sar&agrave; pi&ugrave; modificabile</b>. Viene generato il PDF e caricato su Google Drive fra gli allegati della chiamata.'
+    : 'Il modulo viene salvato come bozza e <b>resta modificabile</b> finch&eacute; non apporrai la firma dell&rsquo;assistito. Il PDF su Google Drive verr&agrave; creato solo al momento della firma.';
+  if(b) b.textContent = conFirma ? 'Firma e chiudi' : 'Salva bozza';
+  apri('mmodmSalva');
+}
 
-  setModalBusy('mmodm', true, 'Preparo il documento…');
-
+// Genera il PDF, lo carica su Drive e lo registra fra gli allegati
+function modmCaricaPdf(callId, esistente){
   return modmGeneraPdf().then(function(blob){
-    setModalBusy('mmodm', true, 'Carico il PDF su Google Drive…');
+    setModalBusy('mmodm', true, 'Carico il PDF su Google Drive\u2026');
     var nome='Modulo M - chiamata '+callId+'.pdf';
     var file=new File([blob], nome, {type:'application/pdf'});
     // Prima carico il nuovo, poi butto il vecchio: se il caricamento fallisce
@@ -6010,28 +6269,42 @@ function modmSalva(poiChiudi){
       return pulizia.then(function(){ return {f:f, nome:nome, size:blob.size}; });
     });
   }).then(function(up){
-    setModalBusy('mmodm', true, 'Registro il modulo…');
-    // Riga negli allegati (così compare nell'elenco e fra gli allegati mail)
+    setModalBusy('mmodm', true, 'Registro il modulo\u2026');
     var vecchioAllegato = esistente && esistente.allegato_id;
-    var creaAllegato = sbFetch('allegati?select=id',{
+    return sbFetch('allegati?select=id',{
       method:'POST', prefer:'return=representation',
       body:{ chiamata_id:callId, drive_file_id:up.f.id, file_name:up.nome,
              mime_type:'application/pdf', size_bytes:up.size,
              user_id: currentUser?currentUser.id:null }
     }).then(function(r){ return r.json(); }).then(function(rows){
-      return (Array.isArray(rows)&&rows[0])?rows[0].id:null;
-    });
-    return creaAllegato.then(function(allegatoId){
+      var allegatoId=(Array.isArray(rows)&&rows[0])?rows[0].id:null;
       if(vecchioAllegato){
         return sbFetch('allegati?id=eq.'+vecchioAllegato,{method:'DELETE'})
           .catch(function(){}).then(function(){ return {allegatoId:allegatoId, up:up}; });
       }
       return {allegatoId:allegatoId, up:up};
     });
-  }).then(function(x){
-    var corpo={ chiamata_id:callId, dati:dati, drive_file_id:x.up.f.id,
-                file_name:x.up.nome, allegato_id:x.allegatoId,
+  });
+}
+
+function modmSalva(poiChiudi){
+  if(!modmCallId){ return Promise.resolve(false); }
+  if(!isOnline()){ fb(false,'Serve connessione','Per salvare il Modulo M serve internet.'); return Promise.resolve(false); }
+  var callId=modmCallId;
+  var dati=modmLeggiDati();
+  var esistente=moduliMByCall[String(callId)];
+  var conFirma=!!modmFirma;
+
+  setModalBusy('mmodm', true, conFirma ? 'Preparo il documento\u2026' : 'Salvo la bozza\u2026');
+
+  // Senza firma resta tutto nel database: nessun PDF, nessun file su Drive
+  var caricamento = conFirma ? modmCaricaPdf(callId, esistente) : Promise.resolve(null);
+
+  return caricamento.then(function(x){
+    setModalBusy('mmodm', true, 'Registro il modulo\u2026');
+    var corpo={ chiamata_id:callId, dati:dati, firmato:conFirma,
                 user_id: currentUser?currentUser.id:null };
+    if(x){ corpo.drive_file_id=x.up.f.id; corpo.file_name=x.up.nome; corpo.allegato_id=x.allegatoId; }
     var req = esistente
       ? sbFetch('moduli_m?chiamata_id=eq.'+callId,{method:'PATCH',prefer:'return=minimal',body:corpo})
       : sbFetch('moduli_m',{method:'POST',prefer:'return=minimal',body:corpo});
@@ -6039,8 +6312,10 @@ function modmSalva(poiChiudi){
   }).then(function(){
     setModalBusy('mmodm', false);
     modmSnapshot=JSON.stringify(dati);
-    fb(true,'Modulo M salvato','Il PDF è stato caricato su Drive e aggiunto agli allegati della chiamata.');
-    if(poiChiudi){ chiudi('mmodm'); modmCallId=null; }
+    fb(true, conFirma ? 'Modulo M firmato' : 'Bozza salvata',
+       conFirma ? 'Il PDF \u00e8 su Google Drive fra gli allegati della chiamata. Il modulo non \u00e8 pi\u00f9 modificabile.'
+                : 'Resta modificabile finch\u00e9 non apporrai la firma dell\u2019assistito.');
+    if(poiChiudi || conFirma){ chiudi('mmodm'); modmCallId=null; }
     return caricaModuliM(getVisibleCallIds()).then(function(){
       return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
     }).then(function(){ loadRows(PAGE); });
@@ -6113,13 +6388,19 @@ function injectModmUi(){
 
     if(salvato){
       if(btn) btn.remove();                       // esiste il modulo: via il pulsante M
+      // Se lo stato bozza/firmato e cambiato, il blocchetto va rifatto
+      if(wrap && wrap.dataset.firmato !== (salvato.firmato?'1':'0')){ wrap.remove(); wrap=null; }
       if(!wrap){
         var dt=tr.querySelector('.dt-wrap');
         if(dt){
           var w=document.createElement('div');
           w.className='modm-link-wrap';
-          w.innerHTML='<span class="modm-link" data-row="'+id+'" title="Apri il Modulo M compilato">'
+          w.dataset.firmato = salvato.firmato ? '1' : '0';
+          var firmato=!!salvato.firmato;
+          w.innerHTML='<span class="modm-link" data-row="'+id+'" title="'
+            +(firmato?'Apri il Modulo M firmato (sola lettura)':'Riprendi la compilazione del Modulo M')+'">'
             +svgModuloM()+'Visualizza modulo M</span>'
+            +(firmato?'':'<span class="modm-bozza">bozza</span>')
             +'<span class="modm-del" data-row="'+id+'" title="Elimina il Modulo M">'
             +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>'
             +'</span>';
@@ -6148,12 +6429,92 @@ function svgModuloM(){
     +'</svg>';
 }
 
+// La lavagna della firma accetta indifferentemente dito, pennino o mouse
+function modmFirmaWiring(){
+  var cv=document.getElementById('modmFirmaCanvas');
+  if(!cv || cv.dataset.pronta) return;
+  cv.dataset.pronta='1';
+  var giu=false, ctx=null;
+  function punto(e){
+    var b=cv.getBoundingClientRect();
+    return { x:e.clientX-b.left, y:e.clientY-b.top };
+  }
+  cv.addEventListener('pointerdown', function(e){
+    e.preventDefault();
+    giu=true; ctx=cv.getContext('2d');
+    try{ cv.setPointerCapture(e.pointerId); }catch(_){}
+    var pt=punto(e);
+    ctx.beginPath(); ctx.moveTo(pt.x,pt.y); ctx.lineTo(pt.x+0.1,pt.y); ctx.stroke();
+    modmFirmaTratti=true;
+    var area=document.getElementById('modmFirmaArea');
+    if(area) area.classList.add('ha-firma');
+  });
+  cv.addEventListener('pointermove', function(e){
+    if(!giu || !ctx) return;
+    e.preventDefault();
+    var pt=punto(e);
+    ctx.lineTo(pt.x,pt.y); ctx.stroke();
+  });
+  ['pointerup','pointercancel','pointerleave'].forEach(function(ev){
+    cv.addEventListener(ev, function(){ giu=false; });
+  });
+}
+
 // ── Collegamenti dei comandi ──
 function setupModmWiring(){
   var cl=document.getElementById('btnModmClose');
   if(cl) cl.addEventListener('click', function(){ modmChiudi(false); });
   var sv=document.getElementById('btnModmSave');
-  if(sv) sv.addEventListener('click', function(){ modmSalva(false); });
+  if(sv) sv.addEventListener('click', function(){ modmChiediSalva(false); });
+
+  var sno=document.getElementById('btnModmSalvaNo');
+  if(sno) sno.addEventListener('click', function(){ chiudi('mmodmSalva'); });
+  var ssi=document.getElementById('btnModmSalvaSi');
+  if(ssi) ssi.addEventListener('click', function(){ chiudi('mmodmSalva'); modmSalva(modmSalvaPoiChiudi); });
+
+  // ── Sezioni: dal foglio in sola lettura al dettaglio dove si compila ──
+  var foglio=document.getElementById('modmFoglio');
+  if(foglio) foglio.addEventListener('click', function(e){
+    if(!foglio.classList.contains('mm-sola-lettura')) return;
+    if(foglio.classList.contains('mm-congelato')) return;
+    var sez=e.target.closest('[data-sez]');
+    if(sez) modmApriSezione(sez);
+  });
+  var back=document.getElementById('btnModmSezBack');
+  if(back) back.addEventListener('click', modmChiudiSezione);
+
+  // ── Firma ──
+  var bfi=document.getElementById('btnModmFirma');
+  if(bfi) bfi.addEventListener('click', modmFirmaApri);
+  var fpul=document.getElementById('btnModmFirmaPulisci');
+  if(fpul) fpul.addEventListener('click', modmFirmaPulisci);
+  var fback=document.getElementById('btnModmFirmaBack');
+  if(fback) fback.addEventListener('click', modmFirmaConferma);
+  var fwno=document.getElementById('btnModmFirmaWarnNo');
+  if(fwno) fwno.addEventListener('click', function(){ chiudi('mmodmFirmaWarn'); });
+  var fwsi=document.getElementById('btnModmFirmaWarnSi');
+  if(fwsi) fwsi.addEventListener('click', function(){
+    chiudi('mmodmFirmaWarn');
+    modmFirma=''; modmMostraFirma(); modmAggiornaStato();
+    modmFirmaAvvia();
+  });
+  modmFirmaWiring();
+
+  // ── Limite di scrittura: il testo non puo uscire dallo spazio della carta ──
+  document.addEventListener('input', function(e){
+    var el=e.target;
+    if(!el || !el.closest) return;
+    if(!el.closest('#modmFoglio, #modmSezCorpo')) return;
+    modmGuardiaInput(el);
+  }, true);
+
+  // Il foglio deve restare interamente a schermo anche cambiando finestra o rotazione
+  var ridisegna=function(){
+    if(!document.getElementById('mmodm').classList.contains('open')) return;
+    modmAdattaScala();
+  };
+  window.addEventListener('resize', ridisegna);
+  window.addEventListener('orientationchange', function(){ setTimeout(ridisegna,250); });
 
   var stay=document.getElementById('btnModmExitStay');
   if(stay) stay.addEventListener('click', function(){ chiudi('mmodmExit'); });
