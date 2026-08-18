@@ -1336,3 +1336,11 @@ body{max-width:100%;overflow-x:clip}
   flex:0 0 54px!important;font-size:8.5px!important;line-height:1.15;
   text-align:center;padding:3px 2px!important;word-break:break-word;
 }
+
+/* In fase di stampa l'ombra del foglio verrebbe spalmata sull'intera pagina
+   dal generatore di immagini, ingrigendo tutto: va tolta. Con lei spariscono
+   anche gli elementi di sola interfaccia, che sulla carta non esistono. */
+.modm-foglio.mm-stampa{box-shadow:none!important}
+.mm-stampa .mm-fig-hint{display:none!important}
+.mm-stampa .mm-lg-del{visibility:hidden!important}
+.mm-stampa .mm-lg{background:transparent!important;border-color:transparent!important;font-weight:400!important;cursor:default}
