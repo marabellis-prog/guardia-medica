@@ -926,6 +926,304 @@
   </div>
 </div>
 
+<!-- ══ MODULO M — Relazione Medica (replica MOD.39271 MEDILIFE) ══ -->
+<div class="mov" id="mmodm">
+  <div class="mbox modm-box">
+    <div class="modm-toolbar">
+      <span class="modm-title">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Modulo M · Relazione Medica
+      </span>
+      <span class="modm-actions">
+        <button class="bcan" id="btnModmClose" type="button">Chiudi</button>
+        <button class="bconf" id="btnModmSave" type="button">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align:-2px;margin-right:4px"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+          Salva
+        </button>
+      </span>
+    </div>
+
+    <div class="modm-scroll">
+      <div class="modm-foglio" id="modmFoglio">
+
+        <!-- INTESTAZIONE -->
+        <div class="mm-head">
+          <div class="mm-head-l">
+            <span class="mm-lbl-cap">REGIONE</span>
+            <input class="mm-in mm-in-line" data-f="regione" style="width:60%">
+          </div>
+          <div class="mm-head-r">
+            <div class="mm-titolo">RELAZIONE MEDICA</div>
+            <div class="mm-data-row">
+              <span class="mm-lbl">DATA</span><input class="mm-in mm-in-line" data-f="data" style="width:90px">
+              <span class="mm-lbl">20</span><input class="mm-in mm-in-line" data-f="anno" style="width:40px">
+              <span class="mm-lbl">ore</span><input class="mm-in mm-in-line" data-f="ora" style="width:70px">
+            </div>
+          </div>
+        </div>
+
+        <!-- TIPO INTERVENTO | MOTIVI -->
+        <div class="mm-r2">
+          <div class="mm-r2-l">
+            <div class="mm-b">Tipo e luogo dell'intervento</div>
+            <div class="mm-tipi">
+              <label class="mm-ck"><input type="checkbox" data-f="tipo_domiciliare"><span>Intervento domiciliare</span></label>
+              <label class="mm-ck"><input type="checkbox" data-f="tipo_ambulatoriale"><span>Prestazione ambulatoriale</span></label>
+              <label class="mm-ck"><input type="checkbox" data-f="tipo_esterno"><span>Intervento in esterno</span></label>
+            </div>
+            <div class="mm-row"><span class="mm-lbl">Località</span><input class="mm-in mm-in-line mm-grow" data-f="localita"></div>
+            <div class="mm-row"><input class="mm-in mm-in-line mm-grow" data-f="localita2"></div>
+            <div class="mm-row"><span class="mm-lbl">Trasporto assistito da</span><input class="mm-in mm-in-line mm-grow" data-f="trasporto_da"></div>
+            <div class="mm-row"><span class="mm-lbl">a</span><input class="mm-in mm-in-line mm-grow" data-f="trasporto_a"></div>
+            <div class="mm-row"><span class="mm-lbl mm-b">Medico</span><input class="mm-in mm-in-line mm-grow" data-f="medico"></div>
+            <div class="mm-row"><span class="mm-lbl mm-b">Sede</span><input class="mm-in mm-in-line mm-grow" data-f="sede"></div>
+            <div class="mm-row"><span class="mm-lbl">Arrivo sul luogo dell'intervento ore</span><input class="mm-in mm-in-line mm-grow" data-f="arrivo_ore"></div>
+            <div class="mm-row"><span class="mm-lbl">Posizione del paziente all'arrivo</span><input class="mm-in mm-in-line mm-grow" data-f="posizione_note"></div>
+            <div class="mm-pos">
+              <label class="mm-ck"><input type="checkbox" data-f="pos_in_piedi"><span>in piedi</span></label>
+              <label class="mm-ck"><input type="checkbox" data-f="pos_seduto"><span>seduto</span></label>
+              <label class="mm-ck"><input type="checkbox" data-f="pos_sdraiato"><span>sdraiato</span></label>
+              <label class="mm-ck"><input type="checkbox" data-f="pos_imprigionato"><span>imprigionato</span></label>
+            </div>
+          </div>
+          <div class="mm-r2-r">
+            <div class="mm-lbl">Motivi e circostanze</div>
+            <textarea class="mm-ta" data-f="motivi" rows="11"></textarea>
+          </div>
+        </div>
+
+        <!-- BARRA -->
+        <div class="mm-bar">Condizioni cliniche all'arrivo del medico</div>
+        <!-- CONDIZIONI CLINICHE -->
+        <div class="mm-clin">
+          <div class="mm-clin-col">
+            <div class="mm-grp">
+              <div class="mm-b">Apparato respiratorio</div>
+              <label class="mm-li"><span>-&nbsp;Indenne</span><input type="checkbox" data-f="resp_indenne"></label>
+              <label class="mm-li"><span>-&nbsp;Ostruzione</span><input type="checkbox" data-f="resp_ostruzione"></label>
+              <label class="mm-li"><span>-&nbsp;Inalazione</span><input type="checkbox" data-f="resp_inalazione"></label>
+              <label class="mm-li"><span>-&nbsp;Cianosi</span><input type="checkbox" data-f="resp_cianosi"></label>
+              <label class="mm-li"><span>-&nbsp;Torace</span><input type="checkbox" data-f="resp_torace"></label>
+              <label class="mm-li"><span>-&nbsp;Dispnea</span><input type="checkbox" data-f="resp_dispnea"></label>
+              <label class="mm-li"><span>-&nbsp;Apnea</span><input type="checkbox" data-f="resp_apnea"></label>
+              <label class="mm-li"><span>-&nbsp;Trauma toracico</span><input type="checkbox" data-f="resp_trauma"></label>
+              <label class="mm-li"><span>-&nbsp;Enfisema sottocutaneo</span><input type="checkbox" data-f="resp_enfisema"></label>
+            </div>
+            <div class="mm-grp mm-grp-top">
+              <div class="mm-b">Sistema nervoso centrale</div>
+              <label class="mm-li"><span>-&nbsp;Indenne</span><input type="checkbox" data-f="snc_indenne"></label>
+              <label class="mm-li"><span>-&nbsp;Coscienza obnubilata</span><input type="checkbox" data-f="snc_obnubilata"></label>
+              <label class="mm-li"><span>-&nbsp;Agitazione</span><input type="checkbox" data-f="snc_agitazione"></label>
+              <label class="mm-li"><span>-&nbsp;Convulsione</span><input type="checkbox" data-f="snc_convulsione"></label>
+              <label class="mm-li"><span>-&nbsp;Trauma cranico</span><input type="checkbox" data-f="snc_trauma"></label>
+              <label class="mm-li mm-li-sub"><span>con perdita di coscienza</span><input type="checkbox" data-f="snc_con_perdita"></label>
+              <label class="mm-li mm-li-sub"><span>senza perdita di coscienza</span><input type="checkbox" data-f="snc_senza_perdita"></label>
+              <label class="mm-li"><span>-&nbsp;Coma (1-2-3-4)</span><input type="checkbox" data-f="snc_coma"></label>
+            </div>
+          </div>
+
+          <div class="mm-clin-col">
+            <div class="mm-grp">
+              <div class="mm-b">Sistema cardiovascolare</div>
+              <div class="mm-li"><span>-&nbsp;Polso Batt./min.</span><input class="mm-in mm-in-line mm-val" data-f="cv_polso"></div>
+              <div class="mm-li"><span>-&nbsp;Pressione art.sa</span><input class="mm-in mm-in-line mm-val" data-f="cv_pressione"></div>
+              <div class="mm-li"><span>-&nbsp;E.C.G.</span><input class="mm-in mm-in-line mm-val" data-f="cv_ecg"></div>
+              <label class="mm-li"><span>-&nbsp;Aritmie</span><input type="checkbox" data-f="cv_aritmie"></label>
+              <label class="mm-li"><span>-&nbsp;Collasso</span><input type="checkbox" data-f="cv_collasso"></label>
+              <label class="mm-li"><span>-&nbsp;Stato di shock</span><input type="checkbox" data-f="cv_shock"></label>
+              <label class="mm-li"><span>-&nbsp;Arresto cardio-circolatorio</span><input type="checkbox" data-f="cv_arresto"></label>
+              <div class="mm-li mm-emo">
+                <span>-&nbsp;Emorragia</span>
+                <label class="mm-ck"><input type="checkbox" data-f="cv_emo_venosa"><span>venosa</span></label>
+                <label class="mm-ck"><input type="checkbox" data-f="cv_emo_arteriosa"><span>arteriosa</span></label>
+              </div>
+            </div>
+            <div class="mm-grp mm-grp-top">
+              <div class="mm-b mm-pup-head"><span>Pupille</span><span class="mm-ds"><i>d</i><i>s</i></span></div>
+              <label class="mm-li mm-li-ds"><span>-&nbsp;Normali</span><i><input type="checkbox" data-f="pup_normali_d"><input type="checkbox" data-f="pup_normali_s"></i></label>
+              <label class="mm-li mm-li-ds"><span>-&nbsp;Miosi</span><i><input type="checkbox" data-f="pup_miosi_d"><input type="checkbox" data-f="pup_miosi_s"></i></label>
+              <label class="mm-li mm-li-ds"><span>-&nbsp;Midriasi</span><i><input type="checkbox" data-f="pup_midriasi_d"><input type="checkbox" data-f="pup_midriasi_s"></i></label>
+              <label class="mm-li mm-li-ds"><span>-&nbsp;Riflessi locomotori</span><i><input type="checkbox" data-f="pup_locomotori_d"><input type="checkbox" data-f="pup_locomotori_s"></i></label>
+              <label class="mm-li mm-li-ds"><span>-&nbsp;Riflessi corneali</span><i><input type="checkbox" data-f="pup_corneali_d"><input type="checkbox" data-f="pup_corneali_s"></i></label>
+              <label class="mm-li mm-li-ds"><span>-&nbsp;Deviazione dello sguardo</span><i><input type="checkbox" data-f="pup_deviazione_d"><input type="checkbox" data-f="pup_deviazione_s"></i></label>
+              <label class="mm-li mm-li-ds"><span>-&nbsp;Nistagmo</span><i><input type="checkbox" data-f="pup_nistagmo_d"><input type="checkbox" data-f="pup_nistagmo_s"></i></label>
+              <div class="mm-li mm-li-ds"><input class="mm-in mm-in-line" data-f="pup_altro_txt" style="flex:1"><i><input type="checkbox" data-f="pup_altro_d"><input type="checkbox" data-f="pup_altro_s"></i></div>
+            </div>
+          </div>
+
+          <div class="mm-clin-fig">
+            <div class="mm-fig-wrap" id="modmFigWrap">
+              <div class="mm-fig-hint">Scegli un segno e tocca il punto sul corpo</div>
+              <div class="mm-fig-canvas" id="modmFig"></div>
+            </div>
+            <div class="mm-legenda" id="modmLegenda">
+              <button type="button" class="mm-lg" data-segno="contusione"><b>&ne;</b> CONTUSIONE</button>
+              <button type="button" class="mm-lg" data-segno="ferita"><b>//</b> FERITA</button>
+              <button type="button" class="mm-lg" data-segno="ustione"><b>&Oslash;</b> USTIONE</button>
+              <button type="button" class="mm-lg" data-segno="frattura_esposta"><b>&#9889;</b> FRATTURA ESPOSTA</button>
+              <button type="button" class="mm-lg" data-segno="frattura_chiusa"><b>O</b> FRATTURA CHIUSA</button>
+              <button type="button" class="mm-lg mm-lg-del" data-segno="cancella"><b>&times;</b> RIMUOVI</button>
+            </div>
+            <div class="mm-codice">
+              <span class="mm-lbl">Codice</span>
+              <input class="mm-in" data-f="codice">
+            </div>
+          </div>
+        </div>
+
+        <div class="mm-altre">
+          <div class="mm-lbl">Altre</div>
+          <textarea class="mm-ta" data-f="altre" rows="4"></textarea>
+        </div>
+
+        <!-- BARRA -->
+        <div class="mm-bar">Provvedimenti terapeutici</div>
+        <!-- PROVVEDIMENTI -->
+        <div class="mm-prov">
+          <div class="mm-prov-l">
+            <div class="mm-cat">
+              <div class="mm-cat-lbl">Respiratori</div>
+              <div class="mm-cat-items">
+                <label class="mm-li"><span>-&nbsp;Ossigeno</span><input type="checkbox" data-f="ter_ossigeno"></label>
+                <label class="mm-li"><span>-&nbsp;Ventilazione con Ambu</span><input type="checkbox" data-f="ter_ambu"></label>
+                <label class="mm-li"><span>-&nbsp;Intubazione tracheale</span><input type="checkbox" data-f="ter_intubazione"></label>
+                <label class="mm-li mm-li-sub"><span>con ventilazione spontanea</span><input type="checkbox" data-f="ter_vent_spontanea"></label>
+                <label class="mm-li mm-li-sub"><span>con ventilazione controllata</span><input type="checkbox" data-f="ter_vent_controllata"></label>
+                <label class="mm-li"><span>-&nbsp;Disostruzione</span><input type="checkbox" data-f="ter_disostruzione"></label>
+              </div>
+            </div>
+            <div class="mm-cat">
+              <div class="mm-cat-lbl">Cardiaci</div>
+              <div class="mm-cat-items">
+                <label class="mm-li"><span>-&nbsp;M.C.E.</span><input type="checkbox" data-f="ter_mce"></label>
+                <label class="mm-li"><span>-&nbsp;Monitoraggio</span><input type="checkbox" data-f="ter_monitoraggio"></label>
+                <label class="mm-li"><span>-&nbsp;Defibrillazione</span><input type="checkbox" data-f="ter_defibrillazione"></label>
+                <label class="mm-li"><span>-&nbsp;Elettrostimolazione</span><input type="checkbox" data-f="ter_elettrostim"></label>
+              </div>
+            </div>
+            <div class="mm-cat">
+              <div class="mm-cat-lbl">Vascolari</div>
+              <div class="mm-cat-items">
+                <label class="mm-li"><span>-&nbsp;Incannulamento venoso</span><input type="checkbox" data-f="ter_incannulamento"></label>
+                <label class="mm-li"><span>-&nbsp;Flussoterapia</span><input type="checkbox" data-f="ter_flussoterapia"></label>
+              </div>
+            </div>
+            <div class="mm-cat">
+              <div class="mm-cat-lbl">Altri</div>
+              <div class="mm-cat-items">
+                <label class="mm-li"><span>-&nbsp;Immobilizzazione</span><input type="checkbox" data-f="ter_immobilizzazione"></label>
+                <label class="mm-li"><span>-&nbsp;Emostasi temporanea</span><input type="checkbox" data-f="ter_emostasi"></label>
+                <label class="mm-li"><span>-&nbsp;Drenaggio toracico</span><input type="checkbox" data-f="ter_drenaggio"></label>
+                <label class="mm-li"><span>-&nbsp;Sonda naso gastrica</span><input type="checkbox" data-f="ter_sonda"></label>
+                <label class="mm-li"><span>-&nbsp;Catetere vescicale</span><input type="checkbox" data-f="ter_catetere"></label>
+                <label class="mm-li"><span>-&nbsp;Medicazione</span><input type="checkbox" data-f="ter_medicazione"></label>
+                <label class="mm-li"><span>-&nbsp;Sutura</span><input type="checkbox" data-f="ter_sutura"></label>
+              </div>
+            </div>
+          </div>
+
+          <div class="mm-prov-r">
+            <div class="mm-farmaci">
+              <div class="mm-cat-lbl mm-cat-lbl-tall">Farmaci somministrati</div>
+              <textarea class="mm-ta mm-ta-farmaci" data-f="farmaci" rows="9"></textarea>
+            </div>
+
+            <div class="mm-bottom">
+              <div class="mm-assistito">
+                <div class="mm-sec-tit">ASSISTITO</div>
+                <div class="mm-ass-row">
+                  <div class="mm-ass-f mm-grow"><input class="mm-in mm-in-line" data-f="ass_nome"><span class="mm-sub">cognome e nome</span></div>
+                  <div class="mm-ass-f" style="width:80px"><input class="mm-in mm-in-line" data-f="ass_sesso"><span class="mm-sub">sesso</span></div>
+                </div>
+                <div class="mm-ass-row">
+                  <div class="mm-ass-f" style="width:70px"><input class="mm-in mm-in-line" data-f="ass_eta"><span class="mm-sub">et&agrave;</span></div>
+                  <div class="mm-ass-f mm-grow"><input class="mm-in mm-in-line" data-f="ass_comune"><span class="mm-sub">comune di residenza</span></div>
+                </div>
+                <div class="mm-ass-row">
+                  <div class="mm-ass-f mm-grow"><input class="mm-in mm-in-line" data-f="ass_indirizzo"><span class="mm-sub">indirizzo</span></div>
+                  <div class="mm-ass-f" style="width:80px"><input class="mm-in mm-in-line" data-f="ass_cap"><span class="mm-sub">cap</span></div>
+                </div>
+                <div class="mm-ass-row">
+                  <div class="mm-ass-f mm-grow"><input class="mm-in mm-in-line" data-f="ass_documento"><span class="mm-sub">estremi documento assistenza sanitaria</span></div>
+                  <div class="mm-ass-f" style="width:90px"><input class="mm-in mm-in-line" data-f="ass_az"><span class="mm-sub">Az. Regione Naz.</span></div>
+                </div>
+              </div>
+
+              <div class="mm-esiti">
+                <div class="mm-sec-tit">ESITI DELL&rsquo;INTERVENTO</div>
+                <div class="mm-esiti-ck">
+                  <div class="mm-esiti-col">
+                    <label class="mm-ck mm-ck-top"><input type="checkbox" data-f="esito_domicilio"><span>Paziente inviato/mantenuto a domicilio</span></label>
+                    <label class="mm-ck mm-ck-top"><input type="checkbox" data-f="esito_ricovero"><span>Disposto ricovero ospedaliero</span></label>
+                  </div>
+                  <div class="mm-esiti-col mm-esiti-box">
+                    <label class="mm-ck mm-ck-top"><input type="checkbox" data-f="esito_non_urgente"><span>L&rsquo;intervento non presentava caratteristiche d&rsquo;urgenza</span></label>
+                  </div>
+                </div>
+                <div class="mm-row"><span class="mm-lbl">c/o</span><input class="mm-in mm-in-line mm-grow" data-f="esito_co"></div>
+                <div class="mm-row"><span class="mm-lbl">Reg.</span><input class="mm-in mm-in-line mm-grow" data-f="esito_reg"></div>
+                <div class="mm-row"><span class="mm-lbl">Intervento terminato ore</span><input class="mm-in mm-in-line mm-grow" data-f="esito_ora_fine"></div>
+                <div class="mm-firma">
+                  <span class="mm-lbl">Il Medico di servizio</span>
+                  <input class="mm-in mm-in-line" data-f="esito_firma">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="mm-piede">MOD.39271 - MEDILIFE</div>
+      </div>
+    </div>
+
+    <div class="mbox-loading" style="display:none">
+      <div class="mbox-loading-inner">
+        <div class="mbox-spin"></div>
+        <div class="mbox-loading-text">Salvataggio in corso&hellip;</div>
+        <div class="mbox-loading-sub">Non chiudere la finestra</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Conferma uscita con modifiche non salvate -->
+<div class="mov" id="mmodmExit">
+  <div class="mbox">
+    <div class="mic wa">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    </div>
+    <div class="mtit">Modifiche non salvate</div>
+    <div class="mmsg">Hai compilato il Modulo M senza salvarlo. Se esci ora perdi quanto scritto.</div>
+    <div class="mac">
+      <button class="bcan" id="btnModmExitStay" type="button">Torna al modulo</button>
+      <button class="bconf2" id="btnModmExitDiscard" type="button">Esci senza salvare</button>
+      <button class="bconf" id="btnModmExitSave" type="button">Salva ed esci</button>
+    </div>
+  </div>
+</div>
+
+<!-- Conferma eliminazione Modulo M -->
+<div class="mov" id="mmodmDel">
+  <div class="mbox">
+    <div class="mic er">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+    </div>
+    <div class="mtit">Eliminare il Modulo M?</div>
+    <div class="mmsg" id="mmodmDelMsg">Verranno eliminati sia il modulo compilato sia il file PDF su Google Drive. Operazione irreversibile.</div>
+    <div class="mac">
+      <button class="bcan" id="btnModmDelCancel" type="button">Annulla</button>
+      <button class="bconf" id="btnModmDelConfirm" type="button" style="background:var(--er);color:#fff">Elimina</button>
+    </div>
+    <div class="mbox-loading" style="display:none">
+      <div class="mbox-loading-inner">
+        <div class="mbox-spin"></div>
+        <div class="mbox-loading-text">Eliminazione in corso&hellip;</div>
+        <div class="mbox-loading-sub">Non chiudere la finestra</div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <script src="config.js?v=1778341017866"></script>
 <script src="script.js?v=1778341017866"></script>
 </body>
