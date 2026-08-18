@@ -6043,6 +6043,8 @@ function modmApriSezione(nodo){
   corpo.innerHTML='';
   corpo.appendChild(nodo);
   nodo.classList.add('mm-dettaglio');
+  // Sul foglio il testo e rimpicciolito per stare nei puntini: qui si legge in grande
+  nodo.querySelectorAll('[data-f]').forEach(function(el){ el.style.fontSize=''; });
   var t=document.getElementById('modmSezTit');
   if(t) t.textContent = nodo.dataset.sezTit || 'Sezione';
   apri('mmodmSez');
