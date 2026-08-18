@@ -6086,6 +6086,7 @@ function modmFirmaPulisci(){
   var cv=document.getElementById('modmFirmaCanvas');
   var area=document.getElementById('modmFirmaArea');
   if(!cv || !area) return;
+  modmDimensionaLavagna(cv);
   var r=cv.getBoundingClientRect();
   if(!r.width) return;
   var dpr=window.devicePixelRatio||1;
@@ -6096,8 +6097,28 @@ function modmFirmaPulisci(){
   ctx.clearRect(0,0,r.width,r.height);
   ctx.lineWidth=2.4; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#12203f';
   area.classList.remove('ha-firma');
+  var hint=document.getElementById('modmFirmaHint');
+  if(hint) hint.style.visibility='';
   modmFirmaTratti=false;
 }
+// La lavagna prende le proporzioni esatte dello spazio che la firma avra sul
+// modulo: quello che si disegna e quello che si vedra stampato, senza schiacciature.
+function modmDimensionaLavagna(cv){
+  var slot=document.getElementById('modmFirmaSlot');
+  var guscio=cv.parentNode ? cv.parentNode.parentNode : null;
+  if(!slot || !guscio) return;
+  var rapporto = (slot.offsetWidth && slot.offsetHeight) ? (slot.offsetWidth/slot.offsetHeight) : 6.7;
+  var cs=getComputedStyle(guscio);
+  var largh = guscio.clientWidth - (parseFloat(cs.paddingLeft)||0) - (parseFloat(cs.paddingRight)||0) - 4;
+  if(largh<80) largh=80;
+  var alt = largh/rapporto;
+  // Non deve sfondare l'altezza disponibile nella finestra
+  var altMax = Math.max(90, window.innerHeight*0.52);
+  if(alt>altMax){ alt=altMax; largh=alt*rapporto; }
+  cv.style.width  = Math.round(largh)+'px';
+  cv.style.height = Math.round(alt)+'px';
+}
+
 // Ritaglio attorno all'inchiostro: cosi la firma riempie bene il suo spazio sul foglio
 function modmRitagliaFirma(){
   var cv=document.getElementById('modmFirmaCanvas');
@@ -6456,6 +6477,8 @@ function modmFirmaWiring(){
     modmFirmaTratti=true;
     var area=document.getElementById('modmFirmaArea');
     if(area) area.classList.add('ha-firma');
+    var hint=document.getElementById('modmFirmaHint');
+    if(hint) hint.style.visibility='hidden';
   });
   cv.addEventListener('pointermove', function(e){
     if(!giu || !ctx) return;
