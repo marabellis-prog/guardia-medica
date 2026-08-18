@@ -1566,3 +1566,15 @@ body{max-width:100%;overflow-x:clip}
   .mbox.modm-firma-box{width:min(460px,94vw)!important}
   .modm-firma-box .modm-firma-guscio{display:none}
 }
+
+
+/* Barra dei comandi compatta: entra in gioco quando la finestra del modulo
+   e stretta (telefono girato). Una riga sola, altezza prevedibile. */
+.modm-box.modm-compatta .modm-title,
+.modm-box.modm-compatta .modm-stato{display:none}
+.modm-box.modm-compatta .modm-toolbar{padding:.35rem .4rem;flex-wrap:nowrap}
+.modm-box.modm-compatta .modm-actions{width:100%;justify-content:space-between;flex-wrap:nowrap;gap:4px}
+.modm-box.modm-compatta .modm-actions button{
+  padding:0 8px;font-size:.74rem;min-height:34px;white-space:nowrap;
+}
+.modm-box.modm-compatta .modm-actions button svg{display:none}
