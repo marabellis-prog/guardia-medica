@@ -6002,12 +6002,13 @@ function modmSalva(poiChiudi){
     setModalBusy('mmodm', true, 'Carico il PDF su Google Drive…');
     var nome='Modulo M - chiamata '+callId+'.pdf';
     var file=new File([blob], nome, {type:'application/pdf'});
-    // Sostituisce il file precedente, se c'era
-    var pulizia = (esistente && esistente.drive_file_id)
-      ? driveDelete(esistente.drive_file_id).catch(function(){})
-      : Promise.resolve();
-    return pulizia.then(function(){ return driveUpload(file); })
-      .then(function(f){ return {f:f, nome:nome, size:blob.size}; });
+    // Prima carico il nuovo, poi butto il vecchio: se il caricamento fallisce
+    // la chiamata conserva comunque il modulo che aveva.
+    return driveUpload(file).then(function(f){
+      var vecchio = esistente && esistente.drive_file_id;
+      var pulizia = (vecchio && vecchio!==f.id) ? driveDelete(vecchio).catch(function(){}) : Promise.resolve();
+      return pulizia.then(function(){ return {f:f, nome:nome, size:blob.size}; });
+    });
   }).then(function(up){
     setModalBusy('mmodm', true, 'Registro il modulo…');
     // Riga negli allegati (così compare nell'elenco e fra gli allegati mail)
