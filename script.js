@@ -5410,10 +5410,24 @@ function startAttachDownload(driveId,fileName){
 }
 
 // ── Delete (con conferma) ────────────────────────────────────────────
+// Il PDF del Modulo M sta negli allegati ma non e un allegato qualsiasi:
+// e il documento della chiamata. Cancellarlo da qui deve cancellarlo ovunque.
+function moduloMDaAllegato(id, driveId){
+  var trovato=null;
+  Object.keys(moduliMByCall).forEach(function(k){
+    var m=moduliMByCall[k]; if(!m || trovato) return;
+    if((m.allegato_id!=null && String(m.allegato_id)===String(id))
+       || (m.drive_file_id && driveId && m.drive_file_id===driveId)) trovato=m;
+  });
+  return trovato;
+}
 function promptAttachDelete(id,driveId,fileName){
-  attachToDelete={ id:id, drive_file_id:driveId, file_name:fileName };
+  var modulo=moduloMDaAllegato(id,driveId);
+  attachToDelete={ id:id, drive_file_id:driveId, file_name:fileName, modulo:modulo };
   var msg=document.getElementById('mattachDelMsg');
-  if(msg)msg.innerHTML='Stai per eliminare <b>'+esc(fileName)+'</b>.<br><br>Verrà rimosso sia da Google Drive sia dall\'elenco. Operazione irreversibile.';
+  if(msg)msg.innerHTML = modulo
+    ? 'Stai per eliminare <b>'+esc(fileName)+'</b>.<br><br>&Egrave; il <b>Modulo M</b> di questa chiamata: sparir&agrave; da Google Drive, dagli allegati e dalla chiamata (via anche la scritta &laquo;Visualizza modulo M&raquo;). Operazione irreversibile.'
+    : 'Stai per eliminare <b>'+esc(fileName)+'</b>.<br><br>Verr&agrave; rimosso sia da Google Drive sia dall\'elenco. Operazione irreversibile.';
   setModalBusy('mattachDel', false);   // ripristina stato pulito
   apri('mattachDel');
 }
@@ -5428,11 +5442,22 @@ function doAttachDelete(){
       if(!res.ok) throw new Error('db_'+res.status);
     });
   }).then(function(){
+    // Se il file era il Modulo M, va tolto anche il modulo: altrimenti resterebbe
+    // la scritta sotto la postazione a puntare a un documento che non c'e piu.
+    if(!a.modulo) return null;
+    setModalBusy('mattachDel', true, 'Rimuovo il Modulo M dalla chiamata…');
+    var filtri=['allegato_id.eq.'+a.id];
+    if(a.drive_file_id) filtri.push('drive_file_id.eq.'+encodeURIComponent(a.drive_file_id));
+    return sbFetch('moduli_m?or=('+filtri.join(',')+')',{method:'DELETE'}).catch(function(){});
+  }).then(function(){
     setModalBusy('mattachDel', false);
     chiudi('mattachDel');
+    var eraModulo=!!(a && a.modulo);
     attachToDelete=null;
-    fb(true,'Eliminato','Allegato rimosso.');
-    loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
+    fb(true,'Eliminato', eraModulo ? 'Modulo M rimosso dalla chiamata, dagli allegati e da Google Drive.' : 'Allegato rimosso.');
+    return caricaModuliM(getVisibleCallIds()).then(function(){
+      return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
+    }).then(function(){ injectModmUi(); });
   }).catch(function(){
     setModalBusy('mattachDel', false);
     fb(false,'Errore','Eliminazione non riuscita. Riprova.');
@@ -6386,7 +6411,13 @@ function modmElimina(){
   var p = m.drive_file_id ? driveDelete(m.drive_file_id).catch(function(){}) : Promise.resolve();
   p.then(function(){
     setModalBusy('mmodmDel', true, 'Aggiorno gli allegati…');
-    return m.allegato_id ? sbFetch('allegati?id=eq.'+m.allegato_id,{method:'DELETE'}).catch(function(){}) : null;
+    // Per sicurezza cerco la riga anche dal file su Drive: se il collegamento
+    // diretto mancasse, l'allegato resterebbe orfano nell'elenco.
+    var filtri=[];
+    if(m.allegato_id) filtri.push('id.eq.'+m.allegato_id);
+    if(m.drive_file_id) filtri.push('drive_file_id.eq.'+encodeURIComponent(m.drive_file_id));
+    if(!filtri.length) return null;
+    return sbFetch('allegati?or=('+filtri.join(',')+')',{method:'DELETE'}).catch(function(){});
   }).then(function(){
     return sbFetch('moduli_m?chiamata_id=eq.'+callId,{method:'DELETE'});
   }).then(function(){
