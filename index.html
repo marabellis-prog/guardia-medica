@@ -1153,7 +1153,7 @@
                   <div class="mm-ass-f" style="width:90px"><input class="mm-in mm-in-line" data-f="ass_az"><span class="mm-sub">Az. Regione Naz.</span></div>
                 </div>
                 <div class="mm-firma-ass" id="modmFirmaBox">
-                  <img class="mm-firma-img" id="modmFirmaImg" alt="">
+                  <div class="mm-firma-slot" id="modmFirmaSlot"><img class="mm-firma-img" id="modmFirmaImg" alt=""></div>
                   <span class="mm-sub">firma dell&rsquo;assistito</span>
                 </div>
               </div>
@@ -1246,10 +1246,14 @@
         </button>
       </span>
     </div>
-    <div class="modm-firma-area" id="modmFirmaArea">
-      <canvas id="modmFirmaCanvas"></canvas>
-      <div class="modm-firma-riga"></div>
-      <div class="modm-firma-hint" id="modmFirmaHint">Firma qui sopra con il dito o con il mouse</div>
+    <div class="modm-firma-guscio">
+      <div class="modm-firma-area" id="modmFirmaArea">
+        <canvas id="modmFirmaCanvas"></canvas>
+        <div class="modm-firma-riga"></div>
+      </div>
+      <div class="modm-firma-hint" id="modmFirmaHint">
+        Firma qui con il dito o con il mouse &mdash; lo spazio ha le stesse proporzioni di quello sul modulo
+      </div>
     </div>
     <div class="modm-ruota" id="modmRuota">
       <svg width="44" height="44" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="7" width="19" height="10" rx="2"/><path d="M8 3.5A6 6 0 0 1 14 2"/><polyline points="14 4.5 14 2 11.5 2"/></svg>
