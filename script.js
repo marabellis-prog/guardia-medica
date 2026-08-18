@@ -5786,7 +5786,10 @@ function modmCampi(){
 
 function modmLeggiDati(){
   var d={};
-  modmCampi().forEach(function(el){
+  var campi=modmCampi().sort(function(a,b){
+    return a.dataset.f<b.dataset.f ? -1 : (a.dataset.f>b.dataset.f ? 1 : 0);
+  });
+  campi.forEach(function(el){
     var k=el.dataset.f;
     d[k] = (el.type==='checkbox') ? !!el.checked : (el.value||'');
   });
@@ -6011,7 +6014,10 @@ function modmAdattaCampo(el){
       if(c.measureText(testo).width<=largh){ ok=true; break; }
     }
   }
-  if(!ok) return false;
+  if(!ok){
+    if(!inDettaglio) el.style.fontSize=MODM_FS_MIN+'px';   // almeno il massimo leggibile
+    return false;
+  }
   if(inDettaglio) el.style.fontSize='';
   else el.style.fontSize=fs+'px';
   return true;
