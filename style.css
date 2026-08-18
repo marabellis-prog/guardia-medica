@@ -1106,3 +1106,222 @@ body{max-width:100%;overflow-x:clip}
   .mail-exist-item{padding:.7rem}
   .mail-exist-item input[type="checkbox"]{width:22px;height:22px}
 }
+
+/* ═══════════════════════════════════════════════════════════════
+   MODULO M — Relazione Medica: replica del modulo cartaceo
+   Il foglio è sempre su fondo bianco con inchiostro blu-grigio,
+   anche in tema scuro: è un documento, non una schermata.
+═══════════════════════════════════════════════════════════════ */
+.mbox.modm-box{
+  width:85vw!important;max-width:85vw!important;
+  height:85vh!important;max-height:85vh!important;
+  padding:0!important;display:flex;flex-direction:column;
+  background:var(--surface);position:relative;overflow:hidden;
+}
+.modm-toolbar{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:.7rem 1rem;border-bottom:1px solid var(--div);flex-shrink:0;background:var(--surface);
+}
+.modm-title{display:flex;align-items:center;gap:.5rem;font-family:var(--fd);font-size:1.05rem;color:var(--tx)}
+.modm-actions{display:flex;gap:.5rem;align-items:center}
+.modm-scroll{flex:1;min-height:0;overflow:auto;background:#8a8a8a;padding:14px;-webkit-overflow-scrolling:touch}
+
+/* ── Il foglio ── */
+.modm-foglio{
+  width:940px;margin:0 auto;background:#fff;color:#2a3550;
+  font-family:Arial,Helvetica,sans-serif;font-size:12px;line-height:1.25;
+  border:1.5px solid #4a5878;box-shadow:0 6px 24px rgba(0,0,0,.35);
+  padding:10px 12px 6px;
+}
+.modm-foglio *{box-sizing:border-box}
+.mm-b{font-weight:700}
+.mm-lbl{color:#2a3550;white-space:nowrap}
+.mm-lbl-cap{font-weight:700;letter-spacing:.06em;color:#3a4a70}
+.mm-grow{flex:1;min-width:0}
+
+/* Campi: solo riga puntinata sotto, come sulla carta */
+.mm-in{
+  border:none;border-bottom:1px dotted #7d8bad;background:transparent;
+  color:#111;font-family:inherit;font-size:12px;padding:0 2px 1px;
+  outline:none;min-width:0;
+}
+.mm-in:focus{border-bottom-color:#2e7d5e;background:#eefaf4}
+.mm-in-line{width:100%}
+.mm-val{width:105px;flex:0 0 auto;margin-left:auto}
+.mm-ta{
+  width:100%;border:none;background:transparent;color:#111;resize:vertical;
+  font-family:inherit;font-size:12px;line-height:20px;padding:0 2px;outline:none;
+  background-image:repeating-linear-gradient(to bottom,transparent 0,transparent 19px,#c3cde0 19px,#c3cde0 20px);
+}
+.mm-ta:focus{background-color:#eefaf4}
+
+/* Caselle da spuntare */
+.mm-li,.mm-ck{display:flex;align-items:center;gap:6px;padding:1px 0;cursor:pointer}
+.mm-li{justify-content:space-between}
+.mm-li>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mm-li-sub>span:first-child{padding-left:12px}
+.mm-li input[type="checkbox"],.mm-ck input[type="checkbox"]{
+  appearance:none;-webkit-appearance:none;
+  width:13px;height:13px;flex:0 0 13px;margin:0;cursor:pointer;
+  border:1.3px solid #56658c;border-radius:2px;background:#fff;position:relative;
+}
+.mm-li input[type="checkbox"]:checked::after,.mm-ck input[type="checkbox"]:checked::after{
+  content:"\2713";position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:900;color:#1a7a4f;line-height:1;
+}
+.mm-ck{gap:5px}
+.mm-ck-top{align-items:flex-start}
+.mm-ck-top input[type="checkbox"]{margin-top:2px}
+
+/* Intestazione */
+.mm-head{display:flex;border-bottom:1.2px solid #4a5878}
+.mm-head-l{flex:0 0 45%;padding:4px 8px 8px;border-right:1.2px solid #4a5878}
+.mm-head-r{flex:1;padding:4px 8px 8px}
+.mm-titolo{text-align:center;font-weight:700;letter-spacing:.05em;font-size:14px;color:#3a4a70}
+.mm-data-row{display:flex;align-items:center;gap:6px;margin-top:14px;justify-content:flex-end}
+
+/* Riga 2: tipo intervento | motivi */
+.mm-r2{display:flex;border-bottom:1.2px solid #4a5878}
+.mm-r2-l{flex:0 0 55%;padding:5px 8px 6px;border-right:1.2px solid #4a5878}
+.mm-r2-r{flex:1;padding:5px 8px 6px;display:flex;flex-direction:column}
+.mm-r2-r .mm-ta{flex:1}
+.mm-tipi{display:flex;flex-wrap:wrap;gap:4px 16px;margin:2px 0 6px}
+.mm-row{display:flex;align-items:center;gap:6px;margin-top:5px}
+.mm-pos{display:flex;gap:14px;margin-top:7px;padding-left:14px;flex-wrap:wrap}
+
+/* Barra scura di sezione */
+.mm-bar{
+  background:#4a4a48;color:#fff;text-align:center;font-weight:700;
+  font-size:15px;padding:3px 0;letter-spacing:.02em;
+}
+
+/* Condizioni cliniche */
+.mm-clin{display:flex;border-bottom:1.2px solid #4a5878}
+.mm-clin-col{flex:0 0 25.5%;border-right:1.2px solid #4a5878;display:flex;flex-direction:column}
+.mm-clin-fig{flex:1;padding:4px 8px;display:flex;flex-direction:column;position:relative}
+.mm-grp{padding:4px 8px 6px}
+.mm-grp-top{border-top:1.2px solid #4a5878;margin-top:auto}
+.mm-emo{gap:10px;justify-content:flex-start}
+.mm-pup-head{display:flex;align-items:center;justify-content:space-between}
+.mm-ds{display:flex;gap:8px;font-style:normal;font-weight:700}
+.mm-ds i{font-style:normal;width:13px;text-align:center}
+.mm-li-ds>i{display:flex;gap:8px;flex:0 0 auto}
+.mm-altre{padding:4px 8px 8px;border-bottom:1.2px solid #4a5878}
+
+/* Figura corporea interattiva */
+.mm-fig-wrap{position:relative;flex:1;min-height:250px}
+.mm-fig-canvas{
+  position:absolute;inset:0;cursor:crosshair;
+  background-repeat:no-repeat;background-position:center;background-size:contain;
+}
+.mm-fig-hint{
+  position:absolute;top:2px;left:0;right:0;text-align:center;
+  font-size:10px;color:#8b97b5;pointer-events:none;z-index:1;
+}
+.mm-segno{
+  position:absolute;transform:translate(-50%,-50%);
+  font-size:15px;font-weight:900;color:#b3261e;line-height:1;
+  cursor:pointer;user-select:none;z-index:2;
+}
+.mm-segno:hover{filter:brightness(1.25)}
+.mm-legenda{display:flex;flex-direction:column;gap:2px;margin-top:4px}
+.mm-lg{
+  display:flex;align-items:center;gap:7px;padding:2px 6px;border-radius:4px;
+  background:transparent;border:1px solid transparent;color:#2a3550;
+  font-family:inherit;font-size:11px;cursor:pointer;text-align:left;
+}
+.mm-lg b{width:14px;text-align:center;font-size:13px}
+.mm-lg:hover{background:#eef2fa}
+.mm-lg.att{background:#d9ead3;border-color:#1a7a4f;font-weight:700}
+.mm-lg-del{color:#b3261e}
+.mm-lg-del.att{background:#fbe0de;border-color:#b3261e}
+.mm-codice{display:flex;align-items:center;gap:6px;margin-top:4px}
+.mm-codice .mm-in{border:1px solid #56658c;width:80px;height:26px}
+
+/* Provvedimenti terapeutici */
+.mm-prov{display:flex}
+.mm-prov-l{flex:0 0 34%;border-right:1.2px solid #4a5878}
+.mm-prov-r{flex:1;display:flex;flex-direction:column}
+.mm-cat{display:flex;border-bottom:1.2px solid #4a5878}
+.mm-cat:last-child{border-bottom:none}
+.mm-cat-lbl{
+  flex:0 0 22px;border-right:1.2px solid #4a5878;font-weight:700;font-size:11px;
+  display:flex;align-items:center;justify-content:center;
+  writing-mode:vertical-rl;transform:rotate(180deg);padding:4px 0;
+}
+.mm-cat-items{flex:1;padding:3px 8px}
+.mm-farmaci{display:flex;border-bottom:1.2px solid #4a5878;flex:1}
+.mm-cat-lbl-tall{flex:0 0 24px;border-right:1.2px solid #4a5878}
+.mm-ta-farmaci{margin:4px 8px;min-height:150px}
+
+/* Assistito + Esiti */
+.mm-bottom{display:flex}
+.mm-assistito{flex:0 0 56%;border-right:1.2px solid #4a5878;padding:0 0 4px}
+.mm-esiti{flex:1;padding:0 8px 4px}
+.mm-sec-tit{text-align:center;font-weight:700;font-size:11.5px;letter-spacing:.04em;padding:3px 0;border-bottom:1.2px solid #4a5878;margin-bottom:6px}
+.mm-ass-row{display:flex;gap:12px;padding:0 8px;margin-top:12px}
+.mm-ass-f{display:flex;flex-direction:column}
+.mm-sub{font-size:9px;color:#6b7899;margin-top:1px}
+.mm-esiti-ck{display:flex;gap:8px;margin-bottom:6px}
+.mm-esiti-col{flex:1;display:flex;flex-direction:column;gap:5px;font-size:11.5px}
+.mm-esiti-box{border:1px solid #4a5878;padding:4px 5px;flex:0 0 42%}
+.mm-firma{display:flex;flex-direction:column;align-items:center;margin-top:8px;gap:2px}
+.mm-firma .mm-in{width:90%}
+.mm-piede{font-size:10px;color:#5b688c;padding:4px 2px 0}
+
+/* Mobile: il foglio si adatta con uno zoom proporzionale */
+@media(max-width:900px){
+  .mbox.modm-box{width:100vw!important;max-width:100vw!important;height:100dvh!important;max-height:100dvh!important;border-radius:0!important}
+  .modm-scroll{padding:0}
+  .modm-foglio{width:940px;transform-origin:top left}
+}
+
+/* Pulsante "M" (Modulo M) nelle azioni della riga */
+.iho-modm{
+  width:32px;height:32px;border-radius:var(--r1);
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(123,63,160,.12);color:#7b3fa0;
+  border:1px solid rgba(123,63,160,.35);
+  cursor:pointer;transition:all var(--tr);flex-shrink:0;
+}
+.iho-modm:hover{background:#7b3fa0;color:#fff;transform:scale(1.05)}
+[data-theme="dark"] .iho-modm{background:rgba(201,154,224,.12);color:#c99ae0;border-color:rgba(201,154,224,.35)}
+[data-theme="dark"] .iho-modm:hover{background:#c99ae0;color:#2a1038}
+
+/* Riga "Visualizza modulo M" sotto la postazione */
+.modm-link-wrap{display:flex;align-items:center;gap:.3rem;margin-top:5px;flex-wrap:wrap}
+.modm-link{
+  display:inline-flex;align-items:center;gap:.3rem;
+  padding:2px 8px;border-radius:99px;cursor:pointer;
+  background:rgba(123,63,160,.12);color:#7b3fa0;
+  border:1px solid rgba(123,63,160,.3);
+  font-size:.75rem;font-weight:600;white-space:nowrap;
+  transition:all var(--tr);
+}
+.modm-link:hover{background:#7b3fa0;color:#fff}
+[data-theme="dark"] .modm-link{background:rgba(201,154,224,.12);color:#c99ae0;border-color:rgba(201,154,224,.3)}
+[data-theme="dark"] .modm-link:hover{background:#c99ae0;color:#2a1038}
+.modm-del{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;border-radius:50%;cursor:pointer;
+  color:var(--er);opacity:.5;transition:all var(--tr);flex-shrink:0;
+}
+.modm-del:hover{opacity:1;background:var(--erbg)}
+@media(hover:none){ .modm-del{opacity:1} .iho-modm{width:36px;height:36px} }
+
+/* Elementi sostitutivi usati solo durante la generazione del PDF */
+.mm-print-ck{
+  width:13px;height:13px;flex:0 0 13px;
+  border:1.3px solid #56658c;border-radius:2px;background:#fff;
+  display:inline-flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:900;color:#1a7a4f;line-height:1;
+}
+.mm-print-ta{
+  width:100%;font-size:12px;line-height:20px;color:#111;
+  white-space:pre-wrap;word-break:break-word;padding:0 2px;
+}
+.mm-print-in{
+  display:inline-block;border-bottom:1px dotted #7d8bad;
+  font-size:12px;color:#111;padding:0 2px 1px;min-height:15px;
+  white-space:nowrap;overflow:hidden;
+}
