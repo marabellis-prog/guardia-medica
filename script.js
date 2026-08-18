@@ -5964,15 +5964,28 @@ function modmAdattaScala(){
   if(!w || !h) return;
   var box=document.querySelector('#mmodm .modm-box');
   var largDisp = Math.min(window.innerWidth*0.98, window.innerWidth-10);
-  var k=1;
-  // Due passate: stringendo la finestra la barra dei comandi puo andare a capo
-  // e cambiare altezza, quindi la misura va ripresa.
-  for(var i=0;i<2;i++){
-    var altDisp = window.innerHeight*0.98 - (barra?barra.offsetHeight:48) - 8;
-    k = Math.min(largDisp/w, altDisp/h, 1);
-    if(box) box.style.setProperty('--modm-w', Math.round(w*k)+'px');
+
+  // La barra dei comandi va misurata a finestra larga. Misurarla a finestra
+  // stretta innescava una rincorsa: la barra andava a capo, rubava altezza,
+  // il foglio si rimpiccioliva, la finestra si stringeva ancora - e cosi via,
+  // fino a ridurre il modulo a un francobollo sul telefono girato.
+  if(box){
+    box.classList.remove('modm-compatta');
+    box.style.setProperty('--modm-w', Math.round(largDisp)+'px');
   }
+  var altDisp = window.innerHeight*0.98 - (barra?barra.offsetHeight:48) - 8;
+  var k = Math.min(largDisp/w, altDisp/h, 1);
+
+  // Se la finestra viene comunque stretta, la barra si fa compatta e resta
+  // su una riga sola: cosi l'altezza e nota e il foglio guadagna spazio.
+  if(box && w*k < 430){
+    box.classList.add('modm-compatta');
+    altDisp = window.innerHeight*0.98 - (barra?barra.offsetHeight:44) - 8;
+    k = Math.min(largDisp/w, altDisp/h, 1);
+  }
+
   foglio.style.transform='scale('+k+')';
+  if(box) box.style.setProperty('--modm-w', Math.round(w*k)+'px');
   palco.style.width  = Math.round(w*k)+'px';
   palco.style.height = Math.round(h*k)+'px';
 }
