@@ -1113,7 +1113,7 @@ body{max-width:100%;overflow-x:clip}
    anche in tema scuro: è un documento, non una schermata.
 ═══════════════════════════════════════════════════════════════ */
 .mbox.modm-box{
-  width:auto!important;max-width:98vw!important;
+  width:var(--modm-w,auto)!important;max-width:98vw!important;
   height:auto!important;max-height:98vh!important;
   padding:0!important;display:flex;flex-direction:column;
   background:var(--surface);position:relative;overflow:hidden;
