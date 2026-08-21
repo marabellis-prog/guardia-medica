@@ -7942,77 +7942,51 @@ function modmSalva(poiChiudi){
   var callId=modmCallId;
   var dati=modmLeggiDati();
   var conFirma=!!modmFirma;
+  var nomeFile='Modulo M - chiamata '+callId+'.pdf';
 
-  setModalBusy('mmodm', true, conFirma ? 'Preparo il documento\u2026' : 'Salvo la bozza\u2026');
+  // ── PRIMA DI TUTTO: al sicuro sul dispositivo ──────────────────────
+  // Dati e firma vengono scritti subito. Nessuna rete, nessun generatore
+  // di documenti: e istantaneo e non puo fallire per colpa della linea.
+  // Il PDF si costruisce dopo, quando il modulo parte davvero.
+  setModalBusy('mmodm', true, 'Salvo sul dispositivo\u2026');
 
-  // 1. Il PDF si prepara subito (le librerie sono in cache anche offline).
-  //    Se non si riesce, si prosegue lo stesso: si rifara al momento dell'invio.
-  // Se il documento non si riesce a produrre adesso (generatore lento o
-  // assente) NON ci si blocca: si salva lo stesso e il PDF si rifa all'invio.
-  var preparaPdf = conFirma
-    ? modmGeneraPdf().catch(function(){ return null; })
-    : Promise.resolve(null);
-
-  return preparaPdf.then(function(blob){
-    setModalBusy('mmodm', true, 'Metto al sicuro sul dispositivo\u2026');
-    return modmCodaScrivi({
-      chiamata_id:callId, dati:dati, firmato:conFirma,
-      pdf:blob||null, nome:'Modulo M - chiamata '+callId+'.pdf',
-      ts:Date.now()
-    }).then(function(ok){ return {ok:ok, blob:blob}; });
-  }).then(function(st){
-    if(!st.ok){
+  return modmCodaScrivi({
+    chiamata_id:callId, dati:dati, firmato:conFirma,
+    pdf:null, nome:nomeFile, ts:Date.now()
+  }).then(function(ok){
+    setModalBusy('mmodm', false);
+    if(!ok){
       // Nemmeno la memoria del dispositivo e disponibile: non si chiude nulla
-      setModalBusy('mmodm', false);
-      fb(false,'Salvataggio non riuscito','La memoria del dispositivo non e disponibile. Non chiudere il modulo: copia altrove i dati importanti e riprova.');
-      throw new Error('storage_locale');
+      fb(false,'Salvataggio non riuscito','La memoria del dispositivo non \u00e8 disponibile. Non chiudere il modulo: copia altrove i dati importanti e riprova.');
+      return false;
     }
+
+    // Da questo momento il modulo NON si perde piu, qualunque cosa accada.
     modmSnapshot=JSON.stringify(dati);
-    // Da qui in poi il modulo NON si perde piu.
-    moduliMLocali[String(callId)]={chiamata_id:callId, dati:dati, firmato:conFirma, nome:'Modulo M - chiamata '+callId+'.pdf'};
+    moduliMLocali[String(callId)]={chiamata_id:callId, dati:dati, firmato:conFirma, nome:nomeFile};
     modmApplicaLocali();
     try{ syncRenderBadge(); }catch(_){}
+    if(poiChiudi || conFirma){ chiudi('mmodm'); modmCallId=null; }
+    injectModmUi();
 
+    var chiamataLocale=String(callId).indexOf('local_')===0;
     if(!isOnline()){
-      setModalBusy('mmodm', false);
-      var chiamataLocale=String(callId).indexOf('local_')===0;
-      fb(true, conFirma ? 'Modulo M firmato (in attesa di linea)' : 'Bozza salvata sul dispositivo',
-         (conFirma ? 'Firma e documento sono al sicuro sul dispositivo. ' : 'Resta modificabile. ')
-         +(chiamataLocale
-            ? 'Partira insieme alla chiamata, appena questa viene registrata.'
-            : 'Partira da solo appena torna la linea.'));
-      if(poiChiudi || conFirma){ chiudi('mmodm'); modmCallId=null; }
-      injectModmUi();
+      fb(true, conFirma ? 'Modulo M firmato e al sicuro' : 'Bozza salvata sul dispositivo',
+         (conFirma ? 'Firma e dati sono salvi qui. ' : 'Resta modificabile. ')
+         +(chiamataLocale ? 'Partir\u00e0 insieme alla chiamata, appena questa viene registrata.'
+                          : 'Partir\u00e0 da solo appena torna la linea.'));
       return true;
     }
 
-    setModalBusy('mmodm', true, conFirma ? 'Carico su Google Drive\u2026' : 'Registro il modulo\u2026');
-    return modmInvia({chiamata_id:callId, dati:dati, firmato:conFirma, pdf:st.blob, nome:'Modulo M - chiamata '+callId+'.pdf'})
-      .then(function(riuscito){
-        setModalBusy('mmodm', false);
-        if(riuscito){
-          delete moduliMLocali[String(callId)];
-          fb(true, conFirma ? 'Modulo M firmato' : 'Bozza salvata',
-             conFirma ? 'Il PDF \u00e8 su Google Drive fra gli allegati della chiamata. Il modulo non \u00e8 pi\u00f9 modificabile.'
-                      : 'Resta modificabile finch\u00e9 non apporrai la firma dell\u2019assistito.');
-        } else {
-          fb(true, 'Salvato sul dispositivo',
-             'Il server non ha risposto: il modulo \u00e8 al sicuro qui e partir\u00e0 da solo al primo momento utile.');
-        }
-        if(poiChiudi || conFirma){ chiudi('mmodm'); modmCallId=null; }
-        return caricaModuliM(getVisibleCallIds()).then(function(){
-          return modmCaricaCodaInMappa();
-        }).then(function(){
-          modmApplicaLocali();
-          return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
-        }).then(function(){ injectModmUi(); return true; });
-      });
+    // ── POI, senza far aspettare nessuno: documento e invio ──
+    fb(true, conFirma ? 'Modulo M firmato' : 'Bozza salvata',
+       conFirma ? 'Al sicuro sul dispositivo. Preparo il documento e lo carico su Google Drive\u2026'
+                : 'Resta modificabile finch\u00e9 non apporrai la firma dell\u2019assistito.');
+    setTimeout(function(){ try{ modmCodaDrena(); }catch(_){} }, 150);
+    return true;
   }).catch(function(e){
     setModalBusy('mmodm', false);
-    var em=String((e&&e.message)||'');
-    if(em!=='storage_locale'){
-      fb(false,'Salvataggio non riuscito','Errore imprevisto ('+em+'). I dati restano nel modulo: riprova.');
-    }
+    fb(false,'Salvataggio non riuscito','Errore imprevisto ('+String((e&&e.message)||'')+'). I dati restano nel modulo: riprova.');
     return false;
   });
 }
