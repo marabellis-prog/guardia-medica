@@ -179,9 +179,24 @@ function authShowOverlay(errorMsg, allowHtml){
   // Riabilita il pulsante "Accedi con Google" (se era in stato "Apertura Google…")
   var btn = document.getElementById('btnAuthGoogle');
   if(btn){
-    btn.disabled = false;
+    var senzaLinea = !isOnline();
+    btn.disabled = senzaLinea;
     var span = btn.querySelector('span');
-    if(span) span.textContent = 'Accedi con Google';
+    if(span) span.textContent = senzaLinea ? 'Senza connessione' : 'Accedi con Google';
+    // Niente fuoco automatico: mentre si scrive, un invio di troppo
+    // lo farebbe partire da solo.
+    try{ btn.blur(); }catch(_){}
+    if(!btn.dataset.vigila){
+      btn.dataset.vigila='1';
+      window.addEventListener('online', function(){
+        btn.disabled=false;
+        var sp=btn.querySelector('span'); if(sp) sp.textContent='Accedi con Google';
+      });
+      window.addEventListener('offline', function(){
+        btn.disabled=true;
+        var sp=btn.querySelector('span'); if(sp) sp.textContent='Senza connessione';
+      });
+    }
   }
   // Nasconde l'app
   document.body.classList.add('auth-pending');
@@ -220,19 +235,20 @@ function salvaProfiloOffline(u){
 function profiloOffline(){
   try{ return JSON.parse(localStorage.getItem(PROFILO_OFFLINE_KEY)||'null'); }catch(_){ return null; }
 }
-// C'e (ancora) una sessione Supabase salvata? Se il login era stato revocato
-// la libreria l'avrebbe rimossa: la sua presenza distingue "rete assente"
-// da "utente mai entrato o buttato fuori".
-function esisteSessioneLocale(){
+var avvioSenzaRete=false;
+var uscitaVoluta=false;      // vero solo quando premi tu «Esci»
+
+// C'e ancora qualcosa che deve partire da questo dispositivo?
+function cosePendenti(){
   try{
-    for(var i=0;i<localStorage.length;i++){
-      var k=localStorage.key(i);
-      if(k && k.indexOf('sb-')===0 && k.indexOf('auth-token')!==-1) return true;
-    }
+    if(syncLoadQueue().length) return true;
+    if(Object.keys(moduliMLocali||{}).length) return true;
+    if(Object.keys(allegatiLocali||{}).length) return true;
+    if(localStorage.getItem(DRAFT_KEY)) return true;
   }catch(_){}
   return false;
 }
-var avvioSenzaRete=false;
+
 function avvioOffline(){
   var p=profiloOffline();
   if(!p || !p.id) return false;
@@ -299,13 +315,24 @@ async function setupAuth(){
   // Listener cambi auth (utile per logout, refresh token)
   client.auth.onAuthStateChange(function(event, session){
     if(event === 'SIGNED_OUT'){
-      currentUser = null;
       currentJwt = null;
       // Se il signOut è stato causato da un check whitelist fallito,
       // NON ricaricare: l'utente deve poter leggere il messaggio di errore.
       if(authRejectInProgress) return;
+
+      // Non l'hai chiesto tu: e la linea che manca. Si continua a lavorare
+      // col profilo di bordo, senza coprire nulla e senza ricaricare.
+      if(!uscitaVoluta && profiloOffline() && (!isOnline() || cosePendenti() || isUserBusy())){
+        currentUser = currentUser || profiloOffline();
+        avvioSenzaRete = true;
+        try{ aggiornaIndicatoreRete(); mostraAvvisoOffline(); }catch(_){}
+        return;
+      }
+
+      currentUser = null;
+      metti_al_sicuro_tutto();          // qualunque cosa succeda, prima si salva
       authShowOverlay();
-      setTimeout(function(){ window.location.reload(); }, 200);
+      setTimeout(function(){ window.location.reload(); }, 400);
     } else if(event === 'TOKEN_REFRESHED' && session){
       // Aggiorna JWT su refresh per non perdere autenticazione
       currentJwt = session.access_token;
@@ -313,13 +340,14 @@ async function setupAuth(){
   });
 
   // Verifica sessione esistente
-  var sessRes = null;
-  try{ sessRes = await client.auth.getSession(); }catch(_e){ sessRes = null; }
+  var sessRes = null, erroreDiRete = false;
+  try{ sessRes = await client.auth.getSession(); }catch(_e){ erroreDiRete = true; }
   var session = sessRes && sessRes.data && sessRes.data.session;
   if(!session){
-    // Il rinnovo del token fallisce anche quando la rete manca: se una
-    // sessione locale esiste ancora, non e un logout - e campagna.
-    if((!isOnline() || esisteSessioneLocale()) && avvioOffline()) return;
+    // Senza linea la sessione non si puo verificare, e la libreria puo averla
+    // gia cancellata: fa fede il profilo di bordo. Se invece la linea c'e ed
+    // e davvero uscito, allora si chiede l'accesso.
+    if((erroreDiRete || !isOnline() || cosePendenti()) && avvioOffline()) return;
     authShowOverlay();
     return;
   }
@@ -397,6 +425,13 @@ async function setupAuth(){
 
 async function authSignInWithGoogle(forceAccountChoice){
   var btn = document.getElementById('btnAuthGoogle');
+  // Senza linea la pagina di Google non si carica: si resterebbe davanti a
+  // uno schermo nero, fuori dall'app e col lavoro interrotto.
+  if(!isOnline()){
+    authShowOverlay('Sei senza connessione: l\u2019accesso a Google non \u00e8 possibile adesso. '
+      +'Riprova appena torna la linea: quello che avevi scritto \u00e8 al sicuro sul dispositivo.', false);
+    return;
+  }
   if(btn){ btn.disabled = true; btn.querySelector('span').textContent = 'Apertura Google…'; }
   try {
     var client = await getSupabaseClient();
@@ -417,12 +452,22 @@ async function authSignInWithGoogle(forceAccountChoice){
 }
 
 async function authSignOut(){
+  // Se c'e ancora roba da inviare, uscire significherebbe perderla
+  if(cosePendenti()){
+    var quante=syncLoadQueue().length;
+    var ok=window.confirm('Ci sono ancora dati da inviare'+(quante?(' ('+quante+')'):'')
+      +'. Uscendo restano sul dispositivo e partiranno al prossimo accesso con questo stesso account.\n\nVuoi uscire lo stesso?');
+    if(!ok) return;
+  }
+  uscitaVoluta=true;
+  metti_al_sicuro_tutto();
+  try{ localStorage.removeItem(PROFILO_OFFLINE_KEY); }catch(_){}
   try {
     var client = await getSupabaseClient();
     await client.auth.signOut();
   } catch(_){}
   currentUser = null;
-  // onAuthStateChange triggera il reload
+  // onAuthStateChange porta al ricaricamento
 }
 
 // ── Indicatore di rete nell'intestazione ───────────────────────────
