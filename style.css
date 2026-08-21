@@ -1454,10 +1454,15 @@ body{max-width:100%;overflow-x:clip}
 .mm-dettaglio .mm-lg b{font-size:15px}
 .mm-dettaglio .mm-codice .mm-in{width:140px;height:40px}
 .mm-dettaglio .mm-firma-ass{display:none}
-.mm-dettaglio .mm-pup-head{justify-content:flex-start;gap:16px}
-.mm-dettaglio .mm-ds{gap:16px}
-.mm-dettaglio .mm-ds i{width:22px}
-.mm-dettaglio .mm-li-ds>i{gap:16px}
+/* Pupille: le lettere d ed s stanno esattamente sopra le due colonne di
+   caselle, come sul modulo di carta. Larghezza e distanza condivise da
+   intestazione e righe tramite le stesse due misure. */
+.mm-dettaglio{--ck:22px;--ckgap:16px}
+.mm-dettaglio .mm-pup-head{justify-content:space-between;padding:0 4px 6px}
+.mm-dettaglio .mm-ds{gap:var(--ckgap)}
+.mm-dettaglio .mm-ds i{width:var(--ck);text-align:center;font-size:15px}
+.mm-dettaglio .mm-li-ds>i{gap:var(--ckgap);align-items:center}
+.mm-dettaglio .mm-li-ds>i input[type="checkbox"]{width:var(--ck);height:var(--ck);flex:0 0 var(--ck)}
 
 /* ── Firma dell'assistito ── */
 .mbox.modm-firma-box{
@@ -1548,7 +1553,7 @@ body{max-width:100%;overflow-x:clip}
   .mm-dettaglio .mm-val{flex:0 0 120px!important;width:120px!important}
   .mm-dettaglio .mm-row,.mm-dettaglio .mm-ass-row{margin-top:12px;flex-wrap:wrap}
   .mm-dettaglio .mm-lg{font-size:14px;padding:10px 14px}
-  .mm-dettaglio .mm-ds i,.mm-dettaglio .mm-li-ds>i{gap:20px}
+  .mm-dettaglio{--ck:24px;--ckgap:18px}
   .modm-toolbar{padding:.5rem .6rem;gap:6px}
   .modm-actions{gap:6px}
   .modm-actions .bcan,.modm-actions .bconf,.modm-actions .bconf2{min-height:42px;padding:0 12px}
@@ -1630,3 +1635,11 @@ body{max-width:100%;overflow-x:clip}
 [data-theme="dark"] .net-dot.net-off{background:rgba(255,167,38,.14);color:#ffb74d;border-color:rgba(255,183,77,.35)}
 @keyframes netOffPulse{0%,100%{opacity:1}50%{opacity:.55}}
 @media(max-width:560px){ .net-dot{width:30px;height:30px} }
+
+/* Modulo M al sicuro sul dispositivo, in attesa che torni la linea */
+.modm-attesa{
+  font-size:.62rem;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+  padding:1px 6px;border-radius:999px;background:#e8eefc;color:#1565c0;
+  border:1px solid rgba(21,101,192,.28);margin-left:2px;flex-shrink:0;
+}
+[data-theme="dark"] .modm-attesa{background:rgba(100,181,246,.14);color:#64b5f6;border-color:rgba(100,181,246,.32)}
