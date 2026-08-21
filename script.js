@@ -5393,10 +5393,27 @@ function ensureDriveFolder(){
     });
 }
 
+// Sul Drive ogni file va con un nome UNIVOCO (suffisso data+caso), cosi dieci
+// "print.pdf" convivono senza sovrascritture ne ambiguita. L'utente non se ne
+// accorge: in app si mostra sempre il nome originale, e l'apertura avviene
+// per identificativo, mai per nome.
+function driveNomeUnivoco(nome){
+  nome=String(nome||'documento');
+  var punto=nome.lastIndexOf('.');
+  var base=(punto>0)?nome.slice(0,punto):nome;
+  var ext=(punto>0)?nome.slice(punto):'';
+  var d=new Date();
+  var pd=function(x){return String(x).padStart(2,'0');};
+  var stampo=pd(d.getDate())+pd(d.getMonth()+1)+String(d.getFullYear()).slice(-2)
+    +'-'+pd(d.getHours())+pd(d.getMinutes())+pd(d.getSeconds());
+  var caso=Math.random().toString(36).slice(2,6);
+  return base+' ['+stampo+'-'+caso+']'+ext;
+}
+
 // Upload multipart di un File → {id, name, mimeType, size}
 function driveUpload(file){
   return ensureDriveFolder().then(function(folderId){
-    var metadata={name:file.name, parents:[folderId]};
+    var metadata={name:driveNomeUnivoco(file.name), parents:[folderId]};
     var boundary='gmca'+String(Date.now())+String(Math.floor(Math.random()*1e6));
     var body=new Blob([
       '--'+boundary+'\r\n',
@@ -5538,7 +5555,7 @@ function doAttachUpload(){
     chain=chain.then(function(){
       return driveUpload(file).then(function(f){
         return sbFetch('allegati',{method:'POST',prefer:'return=minimal',body:{
-          chiamata_id:callId, drive_file_id:f.id, file_name:f.name||file.name,
+          chiamata_id:callId, drive_file_id:f.id, file_name:file.name,
           mime_type:f.mimeType||file.type||null, size_bytes:f.size?parseInt(f.size,10):(file.size||null),
           user_id: currentUser?currentUser.id:null
         }}).then(function(res){
@@ -5874,7 +5891,7 @@ function doSendMail(){
       chain=chain.then(function(){
         return driveUpload(a._file).then(function(f){
           return sbFetch('allegati',{method:'POST',prefer:'return=minimal',body:{
-            chiamata_id:mailModalCallId, drive_file_id:f.id, file_name:f.name||a.name,
+            chiamata_id:mailModalCallId, drive_file_id:f.id, file_name:a.name,
             mime_type:f.mimeType||a._file.type||null,
             size_bytes:f.size?parseInt(f.size,10):(a._file.size||null),
             user_id:currentUser?currentUser.id:null
