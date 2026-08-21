@@ -197,12 +197,85 @@ async function checkWhitelist(client, email){
   return res.data[0];
 }
 
+// ── Avvio senza rete ────────────────────────────────────────────────
+// In campagna la linea spesso non c'e: il login vero e impossibile, ma chi
+// era gia entrato ha il profilo salvato a bordo. Con quello l'app si apre,
+// mostra l'ultimo elenco noto e accetta nuove chiamate (in coda). Appena
+// torna la linea si riaggancia da sola: sessione rinnovata, coda spedita.
+var PROFILO_OFFLINE_KEY='gm_profilo_v1';
+function salvaProfiloOffline(u){
+  if(!u || !u.id) return;
+  try{ localStorage.setItem(PROFILO_OFFLINE_KEY, JSON.stringify(u)); }catch(_){}
+}
+function profiloOffline(){
+  try{ return JSON.parse(localStorage.getItem(PROFILO_OFFLINE_KEY)||'null'); }catch(_){ return null; }
+}
+// C'e (ancora) una sessione Supabase salvata? Se il login era stato revocato
+// la libreria l'avrebbe rimossa: la sua presenza distingue "rete assente"
+// da "utente mai entrato o buttato fuori".
+function esisteSessioneLocale(){
+  try{
+    for(var i=0;i<localStorage.length;i++){
+      var k=localStorage.key(i);
+      if(k && k.indexOf('sb-')===0 && k.indexOf('auth-token')!==-1) return true;
+    }
+  }catch(_){}
+  return false;
+}
+var avvioSenzaRete=false;
+function avvioOffline(){
+  var p=profiloOffline();
+  if(!p || !p.id) return false;
+  avvioSenzaRete=true;
+  currentUser=p; currentJwt=null;
+  authHideOverlay();
+  renderUserMenu();
+  if(currentUser.role==='admin') renderAdminBadge();
+  loadPost();
+  setupAutoRefresh();
+  setupVersionWatcher();
+  restoreDraft();
+  syncRenderBadge();
+  mostraAvvisoOffline();
+  return true;
+}
+function mostraAvvisoOffline(){
+  if(document.getElementById('offlineBanner')) return;
+  var b=document.createElement('div');
+  b.id='offlineBanner';
+  b.className='offline-banner';
+  b.innerHTML='<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>'
+    +'<span>Sei offline: le chiamate si salvano sul dispositivo e partiranno da sole al ritorno della linea.</span>';
+  document.body.appendChild(b);
+}
+function rimuoviAvvisoOffline(){
+  var b=document.getElementById('offlineBanner');
+  if(b) b.remove();
+}
+// Ritorno della linea: rinnova la sessione, spedisce la coda, rilegge.
+function riaggancioRete(){
+  rimuoviAvvisoOffline();
+  if(!currentUser) return;
+  ensureFreshToken().then(function(ok){
+    if(!ok) return;              // sessione non recuperabile: al riavvio si rifara il login
+    avvioSenzaRete=false;
+    syncProcess();
+    safeReloadRows();
+    driveWarmup();
+  });
+}
+if(typeof window!=='undefined'){
+  window.addEventListener('online', riaggancioRete);
+  window.addEventListener('offline', function(){ if(currentUser) mostraAvvisoOffline(); });
+}
+
 async function setupAuth(){
   authShowOverlay(); // mostra subito login screen
   var client;
   try {
     client = await getSupabaseClient();
   } catch(e) {
+    if(avvioOffline()) return;   // niente rete ma profilo noto: si lavora lo stesso
     authShowOverlay('Errore caricamento client autenticazione. Ricarica la pagina.');
     return;
   }
@@ -224,9 +297,13 @@ async function setupAuth(){
   });
 
   // Verifica sessione esistente
-  var sessRes = await client.auth.getSession();
-  var session = sessRes.data && sessRes.data.session;
+  var sessRes = null;
+  try{ sessRes = await client.auth.getSession(); }catch(_e){ sessRes = null; }
+  var session = sessRes && sessRes.data && sessRes.data.session;
   if(!session){
+    // Il rinnovo del token fallisce anche quando la rete manca: se una
+    // sessione locale esiste ancora, non e un logout - e campagna.
+    if((!isOnline() || esisteSessioneLocale()) && avvioOffline()) return;
     authShowOverlay();
     return;
   }
@@ -247,6 +324,7 @@ async function setupAuth(){
   var entry;
   try { entry = await checkWhitelist(client, email); }
   catch(e){
+    if(avvioOffline()) return;   // la verifica richiede rete: senza, profilo di bordo
     authShowOverlay('Errore verifica autorizzazioni: '+(e.message||e), false);
     return;
   }
@@ -290,6 +368,10 @@ async function setupAuth(){
   restoreDraft();
   // CAP mancanti nell'archivio storico: passata unica con la tabella locale
   setTimeout(capBackfillArchive, 4000);
+  // Autorizzazione Drive: controllo silenzioso in parallelo (invito solo se serve)
+  setTimeout(function(){ driveWarmup(true); }, 900);
+  // Il profilo resta a bordo: e la chiave per aprire l'app anche senza rete
+  salvaProfiloOffline(currentUser);
 }
 
 async function authSignInWithGoogle(forceAccountChoice){
@@ -788,6 +870,7 @@ function setupAutoRefresh(){
     if(document.hidden)return;
     var ex=document.getElementById('refreshBanner');
     if(ex)ex.remove();
+    driveWarmup();
     ensureFreshToken().then(function(){
       syncProcess(); // invia eventuali chiamate/modifiche accumulate offline
       if(isUserBusy()){
@@ -1621,7 +1704,15 @@ function loadPost(){
     applyPostazioniData(data);
     setLoaderMsg('Caricamento chiamate…');
     loadRows(1);
-  }).catch(function(){hideLoader();loadRows(1);});
+  }).catch(function(){
+    // Rete assente: meglio le postazioni dell'ultima volta che nessuna
+    try{
+      var raw=localStorage.getItem(POST_CACHE_KEY);
+      var o=raw?JSON.parse(raw):null;
+      if(o && o.data) applyPostazioniData(o.data);
+    }catch(_){}
+    hideLoader();loadRows(1);
+  });
 }
 
 function invalidatePostCache(){try{localStorage.removeItem(POST_CACHE_KEY);}catch(e){}}
@@ -1935,6 +2026,7 @@ function drawRows(recs,highlightQuery){
   tb.innerHTML=recs.map(function(r){
     // Riga chiamata salvata solo in locale (in attesa di invio al server)
     if(r.localPending) return renderPendingInsertRow(r);
+    ricordaBaseRiga(r);
     var tsf=r.tsFormatted||'';
     var parts=tsf.split(' ');
     var ds=parts[0]||'',ts=parts[1]||'';
@@ -2109,10 +2201,16 @@ function syncSaveQueue(q){
   try{localStorage.setItem(SYNC_QUEUE_KEY,JSON.stringify(q));return true;}catch(e){return false;}
 }
 function syncEnqueue(rowId,body){
+  if(!body || !Object.keys(body).length) return;    // differenza vuota: nulla da spedire
   var q=syncLoadQueue();
-  // Dedup: tieni solo l'ultima versione per riga
-  q=q.filter(function(e){return String(e.id)!==String(rowId);});
-  q.push({id:rowId,body:body,ts:Date.now(),attempts:0});
+  // Una sola voce per riga: le differenze si FONDONO (campi diversi convivono)
+  var vecchia=null;
+  q=q.filter(function(e){
+    if(!e.type && String(e.id)===String(rowId)){ vecchia=e; return false; }
+    return true;
+  });
+  var unito = vecchia ? Object.assign({}, vecchia.body||{}, body) : body;
+  q.push({id:rowId,body:unito,ts:Date.now(),attempts:0});
   syncSaveQueue(q);
   syncRenderBadge();
 }
@@ -2374,6 +2472,7 @@ function silentAutoSave(tr,rowId){
   var tsNow=getFormattedTs(tr);
   var body={postazione:po,descrizione:de,note:no};
   var tsISO=italianToISO(tsNow);if(tsISO)body.timestamp_chiamata=tsISO;
+  var patch=diffPatchBody(rowId, body, tsNow);
   var floppy=tr.querySelector('.isv');
   if(floppy){floppy.style.display='flex';floppy.classList.add('saving');floppy.innerHTML='<div class="spin-dark"></div>';}
 
@@ -2382,6 +2481,7 @@ function silentAutoSave(tr,rowId){
     delete dirtyMap[rowId];
     syncDequeue(rowId);
     tr.dataset.originalTs=tsNow;
+    rowBase[String(rowId)]={postazione:po,descrizione:de,note:no,ts:tsNow};
     if(floppy)floppy.style.display='none';
     tr.classList.add('saved-pulse');
     setTimeout(function(){tr.classList.remove('saved-pulse');},900);
@@ -2394,7 +2494,7 @@ function silentAutoSave(tr,rowId){
   };
   var onFailure=function(){
     // Salvataggio fallito → metti in coda per riprovare quando c'è linea
-    syncEnqueue(rowId,body);
+    syncEnqueue(rowId,patch);
     if(floppy){floppy.classList.remove('saving');floppy.innerHTML=svgFloppy();floppy.style.display='none';}
     delete dirtyMap[rowId]; // rimosso da dirtyMap perché ora è in syncQueue
     tr.dataset.originalTs=tsNow;
@@ -2402,13 +2502,45 @@ function silentAutoSave(tr,rowId){
     tr.classList.add('pending-sync');
   };
 
+  // Niente di cambiato rispetto alla base: nessun viaggio inutile
+  if(!Object.keys(patch).length){
+    if(floppy){floppy.classList.remove('saving');floppy.innerHTML=svgFloppy();floppy.style.display='none';}
+    delete dirtyMap[rowId];
+    tr.dataset.originalTs=tsNow;
+    return;
+  }
+
   // Se offline, accoda subito senza tentare
   if(typeof navigator!=='undefined'&&navigator.onLine===false){onFailure();return;}
 
   markOwnWrite();
-  sbFetch('chiamate?id=eq.'+rowId,{method:'PATCH',body:body,prefer:'return=minimal'})
+  sbFetch('chiamate?id=eq.'+rowId,{method:'PATCH',body:patch,prefer:'return=minimal'})
     .then(function(res){if(res.ok)onSuccess();else onFailure();})
     .catch(function(){onFailure();});
+}
+
+// ── Base di confronto per riga ──────────────────────────────────────
+// Quel che il server sapeva quando la riga e stata disegnata. Confrontando
+// con la base, ogni salvataggio spedisce SOLO i campi davvero toccati: cosi
+// cellulare e iPad che ritoccano campi diversi della stessa chiamata si
+// fondono invece di sovrascriversi (l'ultimo vince solo sul campo suo).
+var rowBase={};
+function ricordaBaseRiga(r){
+  if(!r || r.id==null) return;
+  rowBase[String(r.id)]={
+    postazione:r.postazione||'', descrizione:r.descrizione||'',
+    note:r.note||'', ts:r.tsFormatted||''
+  };
+}
+function diffPatchBody(rowId, body, tsNow){
+  var base=rowBase[String(rowId)];
+  if(!base) return body;                       // base ignota: tutto, come prima
+  var out={};
+  if(body.postazione!==base.postazione) out.postazione=body.postazione;
+  if(body.descrizione!==base.descrizione) out.descrizione=body.descrizione;
+  if(body.note!==base.note) out.note=body.note;
+  if(body.timestamp_chiamata && tsNow!==base.ts) out.timestamp_chiamata=body.timestamp_chiamata;
+  return out;
 }
 
 // Costruisce il body PATCH per una riga (riusato da beforeunload)
@@ -2420,7 +2552,8 @@ function buildPatchBodyFromRow(tr){
   var tsNow=getFormattedTs(tr);
   var body={postazione:po,descrizione:de,note:no};
   var tsISO=italianToISO(tsNow);if(tsISO)body.timestamp_chiamata=tsISO;
-  return body;
+  var rowId=tr.dataset?tr.dataset.row:null;
+  return rowId ? diffPatchBody(rowId, body, tsNow) : body;
 }
 
 // ───────────────────────────────────────────────────────────
@@ -5160,6 +5293,7 @@ function getDriveToken(){
           driveAccessToken=resp.access_token;
           driveTokenExpiry=Date.now()+((resp.expires_in||3600)*1000);
           try{ localStorage.setItem(DRIVE_TOK_KEY, JSON.stringify({t:driveAccessToken, exp:driveTokenExpiry})); }catch(_){}
+          driveNascondiInvito();
           resolve(driveAccessToken);
         } else { reject(new Error((resp&&resp.error)||'no_token')); }
       };
@@ -5168,6 +5302,58 @@ function getDriveToken(){
     });
   });
 }
+// ── Controllo autorizzazione all'avvio ──────────────────────────────
+// Verifica il token in parallelo al caricamento, senza disturbare. Se serve
+// una nuova autorizzazione mostra l'invito: il consenso Google puo aprirsi
+// solo da un tocco dell'utente (i browser bloccano le finestre "a freddo").
+var driveWarmupUltimo=0;
+function driveTokenValidoOra(){
+  if(driveAccessToken && Date.now()<driveTokenExpiry-60000) return true;
+  try{
+    var c=JSON.parse(localStorage.getItem(DRIVE_TOK_KEY)||'null');
+    return !!(c && c.t && Date.now()<c.exp-60000);
+  }catch(_){ return false; }
+}
+function driveWarmup(forza){
+  if(!driveConfigured() || !isOnline() || !currentUser) return;
+  if(!forza && Date.now()-driveWarmupUltimo<5*60000) return;   // max una volta ogni 5 minuti
+  driveWarmupUltimo=Date.now();
+  if(!driveTokenValidoOra()){ driveMostraInvito(); return; }
+  // Il token sembra buono: verifica vera con una chiamata leggerissima
+  getDriveToken().then(function(tok){
+    return fetch('https://www.googleapis.com/drive/v3/about?fields=user',{headers:{'Authorization':'Bearer '+tok}});
+  }).then(function(r){
+    if(r.status===401 || r.status===403){ clearDriveToken(); driveMostraInvito(); }
+    else if(r.ok){ driveNascondiInvito(); }
+  }).catch(function(){ /* rete instabile: non disturbare */ });
+}
+function driveMostraInvito(){
+  if(document.getElementById('driveBanner')) return;
+  var b=document.createElement('div');
+  b.id='driveBanner';
+  b.className='drive-banner';
+  b.setAttribute('role','button');
+  b.innerHTML='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M8.5 3.5h7L22 15l-3.5 6h-13L2 15z" opacity="0"/><path d="M9 3.5L2.5 15 6 21h12l3.5-6L15 3.5z" opacity="0"/><path d="M9 3.5h6L21.5 15H15z"/><path d="M9 3.5L2.5 15l3 5.5L12 9z"/><path d="M6.5 20.5h11l3-5.5H9.5z"/></svg>'
+    +'<span><b>Google Drive da attivare</b> &mdash; tocca qui per allegati e Moduli M</span>';
+  b.addEventListener('click',function(){
+    if(b.classList.contains('busy')) return;
+    b.classList.add('busy');
+    clearDriveToken();                              // forza un token nuovo di zecca
+    getDriveToken().then(function(){
+      driveNascondiInvito();
+      fb(true,'Google Drive attivo','Allegati e Moduli M sono pronti.');
+    }).catch(function(){
+      b.classList.remove('busy');
+      fb(false,'Autorizzazione non riuscita','Tocca di nuovo l\'avviso per riprovare.');
+    });
+  });
+  document.body.appendChild(b);
+}
+function driveNascondiInvito(){
+  var b=document.getElementById('driveBanner');
+  if(b) b.remove();
+}
+
 // Invalida il token in cache (usato su 401 dal server Drive)
 function clearDriveToken(){
   driveAccessToken=null; driveTokenExpiry=0;
@@ -5404,7 +5590,7 @@ function startAttachDownload(driveId,fileName){
     var msg='Apertura non riuscita. Riprova.';
     if(em.indexOf('404')!==-1) msg='File non trovato su Drive (forse spostato o eliminato dalla cartella "allegati CA").';
     else if(em.indexOf('403')!==-1) msg='Google Drive ha negato l\'accesso al file. Riprova ad autorizzare Drive.';
-    else if(em.indexOf('popup')!==-1||em.indexOf('token')!==-1||em.indexOf('no_token')!==-1) msg='Non sono riuscito ad autorizzare Google Drive. Riprova (consenti l\'accesso quando richiesto).';
+    else if(em.indexOf('popup')!==-1||em.indexOf('token')!==-1||em.indexOf('no_token')!==-1){ msg='Non sono riuscito ad autorizzare Google Drive. Tocca l\'avviso blu in alto per attivarlo.'; driveMostraInvito(); }
     fb(false,'Errore', msg);
   });
 }
@@ -5776,6 +5962,8 @@ var modmToDelete=null;
 var modmFirma='';            // firma dell'assistito, immagine PNG in formato dati
 var modmFirmaTratti=false;   // e stato disegnato qualcosa sulla lavagna della firma
 var modmFirmaVigile=null;    // controllo periodico delle misure della lavagna
+var modmFirmaStrokes=[];     // tratti in coordinate relative (0..1): la rotazione non li deforma
+var modmFirmaInTratto=false; // penna appoggiata: mentre si scrive non si ridimensiona
 var modmSezAperta=null;      // sezione attualmente aperta in dettaglio
 var modmSalvaPoiChiudi=false;
 var MODM_FS_BASE=12;         // corpo del testo sul foglio
@@ -6144,23 +6332,9 @@ function modmFirmaVigilanza(){
   modmFirmaAdatta();
 }
 function modmFirmaPulisci(){
-  var cv=document.getElementById('modmFirmaCanvas');
-  var area=document.getElementById('modmFirmaArea');
-  if(!cv || !area) return;
-  modmDimensionaLavagna(cv);
-  var r=cv.getBoundingClientRect();
-  if(!r.width) return;
-  var dpr=window.devicePixelRatio||1;
-  cv.width=Math.round(r.width*dpr);
-  cv.height=Math.round(r.height*dpr);
-  var ctx=cv.getContext('2d');
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  ctx.clearRect(0,0,r.width,r.height);
-  ctx.lineWidth=2.4; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#12203f';
-  area.classList.remove('ha-firma');
-  var hint=document.getElementById('modmFirmaHint');
-  if(hint) hint.style.visibility='';
+  modmFirmaStrokes=[];
   modmFirmaTratti=false;
+  modmFirmaSync(true);
 }
 // La lavagna prende le proporzioni esatte dello spazio che la firma avra sul
 // modulo: quello che si disegna e quello che si vedra stampato, senza schiacciature.
@@ -6168,52 +6342,61 @@ function modmMisureLavagna(){
   var slot=document.getElementById('modmFirmaSlot');
   var guscio=document.querySelector('#mmodmFirma .modm-firma-guscio');
   if(!slot || !guscio) return null;
+  // Guscio nascosto (schermo in piedi) o stretto in modo implausibile:
+  // niente misure inventate. E il non-inventare che evita la lavagna 80x12.
+  if(!guscio.offsetWidth || guscio.clientWidth<160) return null;
   var rapporto = (slot.offsetWidth && slot.offsetHeight) ? (slot.offsetWidth/slot.offsetHeight) : 6.7;
   var cs=getComputedStyle(guscio);
   var largh = guscio.clientWidth - (parseFloat(cs.paddingLeft)||0) - (parseFloat(cs.paddingRight)||0) - 4;
-  if(largh<80) largh=80;
+  if(largh<160) return null;
   var alt = largh/rapporto;
   // Non deve sfondare l'altezza disponibile nella finestra
   var altMax = Math.max(90, window.innerHeight*0.52);
   if(alt>altMax){ alt=altMax; largh=alt*rapporto; }
   return { largh:Math.round(largh), alt:Math.round(alt) };
 }
-function modmDimensionaLavagna(cv){
-  var m=modmMisureLavagna(); if(!m) return;
-  cv.style.width  = m.largh+'px';
-  cv.style.height = m.alt+'px';
-}
 
-// Girando il telefono la lavagna cambia misura. Se e stata aperta con lo
-// schermo in piedi non era nemmeno visibile, quindi non aveva misure: senza
-// questo ritocco resterebbe piccola e il dito scriverebbe fuori posto.
-function modmFirmaAdatta(){
+// Un'unica funzione rimette tutto in squadra: misura lo spazio, dimensiona la
+// lavagna, allinea il disegno interno a quel che si vede e ridisegna i tratti.
+// I tratti sono conservati in coordinate relative: qualunque giravolta del
+// telefono li ridisegna al posto giusto, mai sfalsati.
+function modmFirmaSync(forza){
   var ov=document.getElementById('mmodmFirma');
-  if(!ov || !ov.classList.contains('open')) return;
+  if(!ov || !ov.classList.contains('open')) return false;
+  if(modmFirmaInTratto && !forza) return true;       // penna appoggiata: non adesso
   var cv=document.getElementById('modmFirmaCanvas');
   var area=document.getElementById('modmFirmaArea');
-  if(!cv || !area || !area.offsetWidth) return;      // ancora nascosta
+  if(!cv || !area || !area.offsetWidth) return false; // nascosta (schermo in piedi)
+  var m=modmMisureLavagna();
+  if(m){
+    if(cv.style.width !== m.largh+'px') cv.style.width=m.largh+'px';
+    if(cv.style.height !== m.alt+'px')  cv.style.height=m.alt+'px';
+  }
+  var r=cv.getBoundingClientRect();
+  if(!r.width || !r.height) return false;
   var dpr=window.devicePixelRatio||1;
-  var attesa=modmMisureLavagna();
-  if(attesa && cv.width===Math.round(attesa.largh*dpr) && cv.height===Math.round(attesa.alt*dpr)) return;
-  // conserva quel che era gia stato disegnato
-  var vecchio=null;
-  if(modmFirmaTratti && cv.width && cv.height){
-    vecchio=document.createElement('canvas');
-    vecchio.width=cv.width; vecchio.height=cv.height;
-    vecchio.getContext('2d').drawImage(cv,0,0);
-  }
-  var eraFirmato=modmFirmaTratti;
-  modmFirmaPulisci();
-  if(vecchio){
-    // le proporzioni non cambiano, quindi il disegno si riadatta senza deformarsi
-    cv.getContext('2d').drawImage(vecchio, 0, 0, cv.width/dpr, cv.height/dpr);
-    modmFirmaTratti=eraFirmato;
-    area.classList.add('ha-firma');
-    var hint=document.getElementById('modmFirmaHint');
-    if(hint) hint.style.visibility='hidden';
-  }
+  var W=Math.round(r.width*dpr), H=Math.round(r.height*dpr);
+  if(!forza && cv.width===W && cv.height===H) return true;   // gia in squadra
+  cv.width=W; cv.height=H;                                    // azzera bitmap e stato
+  var ctx=cv.getContext('2d');
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.lineWidth=2.4; ctx.lineCap='round'; ctx.lineJoin='round'; ctx.strokeStyle='#12203f';
+  modmFirmaStrokes.forEach(function(tr){
+    if(!tr.length) return;
+    ctx.beginPath();
+    ctx.moveTo(tr[0].x*r.width, tr[0].y*r.height);
+    if(tr.length===1) ctx.lineTo(tr[0].x*r.width+0.1, tr[0].y*r.height);
+    for(var i=1;i<tr.length;i++) ctx.lineTo(tr[i].x*r.width, tr[i].y*r.height);
+    ctx.stroke();
+  });
+  var haFirma=modmFirmaStrokes.length>0;
+  modmFirmaTratti=haFirma;
+  area.classList.toggle('ha-firma', haFirma);
+  var hint=document.getElementById('modmFirmaHint');
+  if(hint) hint.style.visibility = haFirma ? 'hidden' : '';
+  return true;
 }
+function modmFirmaAdatta(){ modmFirmaSync(false); }
 
 // Ritaglio attorno all'inchiostro: cosi la firma riempie bene il suo spazio sul foglio
 function modmRitagliaFirma(){
@@ -6565,32 +6748,40 @@ function modmFirmaWiring(){
   var cv=document.getElementById('modmFirmaCanvas');
   if(!cv || cv.dataset.pronta) return;
   cv.dataset.pronta='1';
-  var giu=false, ctx=null;
-  function punto(e){
-    var b=cv.getBoundingClientRect();
-    return { x:e.clientX-b.left, y:e.clientY-b.top };
-  }
+  var tratto=null, rl=0, rt=0, rw=0, rh=0;
   cv.addEventListener('pointerdown', function(e){
     e.preventDefault();
-    modmFirmaAdatta();          // se il telefono e appena stato girato, rimette in squadra
-    giu=true; ctx=cv.getContext('2d');
+    modmFirmaSync(false);       // telefono appena girato? prima ci si rimette in squadra
+    var r=cv.getBoundingClientRect();
+    if(!r.width || !r.height) return;
+    rl=r.left; rt=r.top; rw=r.width; rh=r.height;
+    modmFirmaInTratto=true;
     try{ cv.setPointerCapture(e.pointerId); }catch(_){}
-    var pt=punto(e);
-    ctx.beginPath(); ctx.moveTo(pt.x,pt.y); ctx.lineTo(pt.x+0.1,pt.y); ctx.stroke();
+    var x=e.clientX-rl, y=e.clientY-rt;
+    tratto=[{x:x/rw, y:y/rh}];
+    modmFirmaStrokes.push(tratto);
     modmFirmaTratti=true;
+    var ctx=cv.getContext('2d');
+    ctx.beginPath(); ctx.moveTo(x,y); ctx.lineTo(x+0.1,y); ctx.stroke();
     var area=document.getElementById('modmFirmaArea');
     if(area) area.classList.add('ha-firma');
     var hint=document.getElementById('modmFirmaHint');
     if(hint) hint.style.visibility='hidden';
   });
   cv.addEventListener('pointermove', function(e){
-    if(!giu || !ctx) return;
+    if(!modmFirmaInTratto || !tratto) return;
     e.preventDefault();
-    var pt=punto(e);
-    ctx.lineTo(pt.x,pt.y); ctx.stroke();
+    var x=e.clientX-rl, y=e.clientY-rt;
+    tratto.push({x:x/rw, y:y/rh});
+    var ctx=cv.getContext('2d');
+    ctx.lineTo(x,y); ctx.stroke();
   });
   ['pointerup','pointercancel','pointerleave'].forEach(function(ev){
-    cv.addEventListener(ev, function(){ giu=false; });
+    cv.addEventListener(ev, function(){
+      if(!modmFirmaInTratto) return;
+      modmFirmaInTratto=false; tratto=null;
+      modmFirmaSync(false);     // se durante il tratto e cambiato qualcosa, riallinea ora
+    });
   });
 
   // Girando il telefono, o quando la lavagna passa da nascosta a visibile,
