@@ -3124,9 +3124,29 @@ function setupTableDelegation(){
     if(idelLocal){
       e.stopPropagation();
       var uuid=idelLocal.dataset.uuid;
-      if(window.confirm('Eliminare questa chiamata salvata in locale?\n\nNon è ancora stata inviata al server: verrà eliminata definitivamente e NON sarà recuperabile.')){
+      var chiave='local_'+uuid;
+      var quantiAll=(allegatiLocali[chiave]||[]).length;
+      var haModulo=!!moduliMLocali[chiave];
+      var extra='';
+      if(quantiAll||haModulo){
+        extra='\n\nVerranno eliminati anche '
+          +(quantiAll?(quantiAll+' allegat'+(quantiAll===1?'o':'i')):'')
+          +((quantiAll&&haModulo)?' e ':'')
+          +(haModulo?'il Modulo M':'')+' in attesa di invio.';
+      }
+      if(window.confirm('Eliminare questa chiamata salvata in locale?\n\nNon è ancora stata inviata al server: verrà eliminata definitivamente e NON sarà recuperabile.'+extra)){
         syncDequeueInsert(uuid);
-        loadRows(PAGE);
+        // Via anche allegati e Modulo M che aspettavano questa chiamata,
+        // altrimenti resterebbero in cassaforte senza piu un padrone.
+        var puliz=[];
+        (allegatiLocali[chiave]||[]).forEach(function(r){ puliz.push(allegCodaCancella(r.id)); });
+        if(haModulo) puliz.push(modmCodaCancella(chiave));
+        delete allegatiLocali[chiave];
+        delete moduliMLocali[chiave];
+        delete moduliMByCall[chiave];
+        Promise.all(puliz).then(function(){
+          return Promise.all([allegCaricaCodaInMappa(), modmCaricaCodaInMappa()]);
+        }).then(function(){ loadRows(PAGE); syncRenderBadge(); });
       }
       return;
     }
@@ -3626,7 +3646,21 @@ function trashEmptyAll(){
   var btn=document.getElementById('btnTrashEmptyConfirm');
   if(btn){btn.disabled=true;btn.innerHTML='<div class="spin"></div> Svuoto…';}
   markOwnWrite();
-  sbFetch('chiamate?deleted_at=not.is.null',{method:'DELETE'}).then(function(res){
+  // PRIMA i documenti su Drive: cancellate le righe non si saprebbe piu
+  // quali file erano, e resterebbero abbandonati per sempre.
+  var idsCestino=[];
+  sbFetch('chiamate?deleted_at=not.is.null&select=id').then(function(r){ return r.json(); })
+   .then(function(righe){
+     if(Array.isArray(righe)) idsCestino=righe.map(function(x){ return x.id; });
+     if(!idsCestino.length) return 0;
+     if(btn) btn.innerHTML='<div class="spin"></div> Elimino i documenti…';
+     return ripuliscDriveDiChiamate('chiamata_id=in.('+idsCestino.join(',')+')');
+   })
+   .catch(function(){ return 0; })
+   .then(function(){
+     if(btn) btn.innerHTML='<div class="spin"></div> Svuoto…';
+     return sbFetch('chiamate?deleted_at=not.is.null',{method:'DELETE'});
+   }).then(function(res){
     chiudi('mtrashEmpty');
     if(btn){btn.disabled=false;btn.innerHTML='Svuota';}
     if(res.ok){
@@ -3654,7 +3688,17 @@ function autoPurgeOld(){
   if(typeof navigator!=='undefined'&&navigator.onLine===false)return;
   var cutoff=new Date(now-TRASH_RETENTION_DAYS*86400000).toISOString();
   markOwnWrite();
-  sbFetch('chiamate?deleted_at=lt.'+cutoff,{method:'DELETE'}).then(function(){}).catch(function(){});
+  // Anche la pulizia automatica deve portarsi via i documenti su Drive
+  sbFetch('chiamate?deleted_at=lt.'+cutoff+'&select=id').then(function(r){ return r.json(); })
+   .then(function(righe){
+     var ids=(Array.isArray(righe)?righe:[]).map(function(x){ return x.id; });
+     if(!ids.length) return 0;
+     return inSfondoDrive(function(){ return ripuliscDriveDiChiamate('chiamata_id=in.('+ids.join(',')+')'); });
+   })
+   .catch(function(){ return 0; })
+   .then(function(){
+     return sbFetch('chiamate?deleted_at=lt.'+cutoff,{method:'DELETE'});
+   }).then(function(){}).catch(function(){});
 }
 
 function showUndoBanner(rowId){
@@ -5847,10 +5891,13 @@ function tokenDaBrowser(silenzioso){
 // Quante operazioni di sfondo sono in corso: finche e maggiore di zero
 // nessuna finestra di Google puo aprirsi.
 var driveInSfondo=0;
-function inSfondoDrive(promessa){
+function inSfondoDrive(lavoro){
   driveInSfondo++;
   var giu=function(v){ driveInSfondo=Math.max(0,driveInSfondo-1); return v; };
-  return promessa.then(giu, function(e){ giu(); throw e; });
+  // Accetta sia una funzione (protetta fin dal primo istante) sia una
+  // promessa gia avviata: la forma con funzione e la piu sicura.
+  var p = (typeof lavoro==='function') ? Promise.resolve().then(lavoro) : Promise.resolve(lavoro);
+  return p.then(giu, function(e){ giu(); throw e; });
 }
 // Distinguere «sto scrivendo» da «ho appena toccato un comando»: nel primo
 // caso nessuna finestra puo aprirsi, nel secondo e l'utente che l'ha chiesta.
@@ -6247,6 +6294,85 @@ function allegInvia(rec){
 if(typeof window!=='undefined'){
   window.addEventListener('online', function(){ setTimeout(allegCodaDrena, 1500); });
   setInterval(function(){ allegCodaDrena(); }, 20000);
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// PULIZIA DI GOOGLE DRIVE
+// Un documento clinico che resta su Drive senza piu una chiamata a cui
+// appartenere e un problema, non un dettaglio: ogni eliminazione deve
+// portarsi via anche il file.
+// ═══════════════════════════════════════════════════════════════════
+
+// Tutti i file (allegati + PDF dei Moduli M) delle chiamate indicate
+function fileSuDriveDi(filtroChiamate){
+  var elenco=[];
+  return sbFetch('allegati?'+filtroChiamate+'&select=drive_file_id')
+    .then(function(r){ return r.json(); })
+    .then(function(righe){
+      if(Array.isArray(righe)) righe.forEach(function(a){ if(a.drive_file_id) elenco.push(a.drive_file_id); });
+      return sbFetch('moduli_m?'+filtroChiamate+'&select=drive_file_id');
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(righe){
+      if(Array.isArray(righe)) righe.forEach(function(m){ if(m.drive_file_id) elenco.push(m.drive_file_id); });
+      // niente doppioni
+      var visti={}, unici=[];
+      elenco.forEach(function(id){ if(!visti[id]){ visti[id]=1; unici.push(id); } });
+      return unici;
+    })
+    .catch(function(){ return []; });
+}
+
+// Cancella una lista di file da Drive, uno per volta, senza fermarsi ai buchi
+function cancellaDaDrive(ids){
+  if(!ids || !ids.length) return Promise.resolve(0);
+  var fatti=0;
+  var catena=Promise.resolve();
+  ids.forEach(function(id){
+    catena=catena.then(function(){
+      return driveDelete(id).then(function(){ fatti++; }).catch(function(){});
+    });
+  });
+  return catena.then(function(){ return fatti; });
+}
+
+// Prima di eliminare per sempre delle chiamate: via anche i loro documenti
+function ripuliscDriveDiChiamate(filtroChiamate){
+  if(!driveConfigured() || !isOnline()) return Promise.resolve(0);
+  return fileSuDriveDi(filtroChiamate).then(cancellaDaDrive).catch(function(){ return 0; });
+}
+
+// ── Caccia agli orfani: file rimasti su Drive senza piu una chiamata ──
+// Con il permesso «drive.file» l'app vede SOLO i file che ha creato lei,
+// quindi non puo toccare nient'altro del tuo Drive.
+function cercaFileOrfani(){
+  return ensureDriveFolder().then(function(cartella){
+    var q=encodeURIComponent("'"+cartella+"' in parents and trashed=false");
+    var tutti=[];
+    var pagina=function(token){
+      var url='https://www.googleapis.com/drive/v3/files?q='+q
+        +'&fields=nextPageToken,files(id,name,createdTime,size)&pageSize=200&spaces=drive'
+        +(token?('&pageToken='+encodeURIComponent(token)):'');
+      return driveFetch(url).then(function(r){ return r.json(); }).then(function(d){
+        if(d && d.files) tutti=tutti.concat(d.files);
+        if(d && d.nextPageToken) return pagina(d.nextPageToken);
+        return tutti;
+      });
+    };
+    return pagina(null);
+  }).then(function(suDrive){
+    // Quali sono ancora collegati a qualcosa?
+    return sbFetch('allegati?select=drive_file_id')
+      .then(function(r){ return r.json(); })
+      .then(function(a){
+        var usati={};
+        if(Array.isArray(a)) a.forEach(function(x){ if(x.drive_file_id) usati[x.drive_file_id]=1; });
+        return sbFetch('moduli_m?select=drive_file_id').then(function(r){ return r.json(); }).then(function(m){
+          if(Array.isArray(m)) m.forEach(function(x){ if(x.drive_file_id) usati[x.drive_file_id]=1; });
+          return suDrive.filter(function(f){ return !usati[f.id]; });
+        });
+      });
+  });
 }
 
 // ── Metadati allegati (Supabase) ─────────────────────────────────────
@@ -8045,6 +8171,64 @@ function setupModmWiring(){
   if(disc) disc.addEventListener('click', function(){ chiudi('mmodmExit'); modmChiudi(true); });
   var svx=document.getElementById('btnModmExitSave');
   if(svx) svx.addEventListener('click', function(){ chiudi('mmodmExit'); modmSalva(true); });
+
+  // ── Documenti abbandonati su Drive ──
+  var orfaniTrovati=[];
+  var bCerca=document.getElementById('btnOrfaniCerca');
+  var bElim=document.getElementById('btnOrfaniElimina');
+  var esito=document.getElementById('orfaniEsito');
+  var scriviEsito=function(html){ if(esito) esito.innerHTML=html; };
+
+  if(bCerca) bCerca.addEventListener('click', function(){
+    if(!isOnline()){ scriviEsito('<b>Serve la connessione</b> per controllare Google Drive.'); return; }
+    bCerca.disabled=true; bCerca.innerHTML='<div class="spin"></div> Controllo\u2026';
+    if(bElim) bElim.style.display='none';
+    scriviEsito('');
+    cercaFileOrfani().then(function(lista){
+      orfaniTrovati=lista||[];
+      bCerca.disabled=false; bCerca.textContent='Cerca documenti abbandonati';
+      if(!orfaniTrovati.length){
+        scriviEsito('<b>Tutto in ordine:</b> nessun documento abbandonato. Ogni file su Drive appartiene a una chiamata.');
+        return;
+      }
+      var righe=orfaniTrovati.map(function(f){
+        var quando='';
+        try{
+          var d=new Date(f.createdTime), pd=function(x){return String(x).padStart(2,'0');};
+          quando=pd(d.getDate())+'/'+pd(d.getMonth()+1)+'/'+d.getFullYear();
+        }catch(_){}
+        return '<div class="orfani-riga"><span class="orfani-nome">'+esc(f.name||'senza nome')+'</span>'
+             +'<span class="orfani-data">'+esc(quando)+'</span></div>';
+      }).join('');
+      scriviEsito('<b>'+orfaniTrovati.length+' document'+(orfaniTrovati.length===1?'o abbandonato':'i abbandonati')+'</b>'
+        +' &mdash; non appartengono a nessuna chiamata:'
+        +'<div class="orfani-elenco">'+righe+'</div>');
+      if(bElim) bElim.style.display='';
+    }).catch(function(e){
+      bCerca.disabled=false; bCerca.textContent='Cerca documenti abbandonati';
+      var m=String((e&&e.message)||'');
+      scriviEsito('<b>Controllo non riuscito.</b> '+(m.indexOf('token')!==-1||m.indexOf('popup')!==-1
+        ? 'Autorizza prima Google Drive (l\u2019avviso blu in alto).' : 'Riprova fra poco.'));
+    });
+  });
+
+  if(bElim) bElim.addEventListener('click', function(){
+    if(!orfaniTrovati.length) return;
+    if(!window.confirm('Eliminare definitivamente '+orfaniTrovati.length+' document'
+      +(orfaniTrovati.length===1?'o':'i')+' da Google Drive?\n\nSono file che non appartengono pi\u00f9 ad alcuna chiamata. L\u2019operazione non si pu\u00f2 annullare.')) return;
+    bElim.disabled=true; bElim.innerHTML='<div class="spin"></div> Elimino\u2026';
+    cancellaDaDrive(orfaniTrovati.map(function(f){ return f.id; })).then(function(fatti){
+      bElim.disabled=false; bElim.textContent='Elimina definitivamente';
+      bElim.style.display='none';
+      var restano=orfaniTrovati.length-fatti;
+      orfaniTrovati=[];
+      scriviEsito('<b>'+fatti+' document'+(fatti===1?'o eliminato':'i eliminati')+'</b> da Google Drive.'
+        +(restano>0?(' '+restano+' non '+(restano===1?'\u00e8 stato rimosso':'sono stati rimossi')+': riprova.'):''));
+    }).catch(function(){
+      bElim.disabled=false; bElim.textContent='Elimina definitivamente';
+      scriviEsito('<b>Eliminazione non riuscita.</b> Riprova fra poco.');
+    });
+  });
 
   var dc=document.getElementById('btnModmDelCancel');
   if(dc) dc.addEventListener('click', function(){ chiudi('mmodmDel'); modmToDelete=null; });
