@@ -3699,32 +3699,36 @@ function renderTrashList(){
 }
 
 function trashRestoreOne(id,rowEl){
-  // I file su Drive tornano insieme alla chiamata
-  drivePerChiamata('untrash', id);
   if(typeof navigator!=='undefined'&&navigator.onLine===false){
     fb(false,'Offline','Impossibile ripristinare ora. Riprova quando hai connessione.');
     return;
   }
-  rowEl.style.opacity='.5';rowEl.style.pointerEvents='none';
+  // I file su Drive tornano insieme alla chiamata (solo se si procede davvero)
+  drivePerChiamata('untrash', id);
+  if(rowEl){ rowEl.style.opacity='.5'; rowEl.style.pointerEvents='none'; }
   markOwnWrite();
   sbFetch('chiamate?id=eq.'+id,{method:'PATCH',body:{deleted_at:null},prefer:'return=minimal'}).then(function(res){
     if(res.ok){
-      rowEl.style.transition='opacity .25s,transform .25s';
-      rowEl.style.opacity='0';rowEl.style.transform='translateX(-20px)';
-      setTimeout(function(){
-        if(rowEl.parentNode)rowEl.remove();
-        var remaining=document.querySelectorAll('#trashList .trash-row').length;
-        if(remaining===0)renderTrashList();
-        refreshTrashBadge();
-      },280);
+      if(rowEl){
+        rowEl.style.transition='opacity .25s,transform .25s';
+        rowEl.style.opacity='0';rowEl.style.transform='translateX(-20px)';
+        setTimeout(function(){
+          if(rowEl.parentNode)rowEl.remove();
+          var remaining=document.querySelectorAll('#trashList .trash-row').length;
+          if(remaining===0)renderTrashList();
+          refreshTrashBadge();
+        },280);
+      } else {
+        renderTrashList(); refreshTrashBadge();
+      }
       loadRows(PAGE);
       fb(true,'Ripristinata','Chiamata ripristinata.');
     } else {
-      rowEl.style.opacity='';rowEl.style.pointerEvents='';
+      if(rowEl){ rowEl.style.opacity='';rowEl.style.pointerEvents=''; }
       fb(false,'Errore','Ripristino fallito.');
     }
   }).catch(function(){
-    rowEl.style.opacity='';rowEl.style.pointerEvents='';
+    if(rowEl){ rowEl.style.opacity='';rowEl.style.pointerEvents=''; }
     fb(false,'Errore','Server non raggiungibile.');
   });
 }
