@@ -336,14 +336,15 @@ function fermaVigilanzaRete(){
   if(_vigileRete){ clearInterval(_vigileRete); _vigileRete=null; }
 }
 // Tutto quel che deve partire, subito e insieme
-function drenaTuttoSubito(){
+function drenaTuttoSubito(forza){
   try{ syncProcess(); }catch(_){}
-  try{ modmCodaDrena(); }catch(_){}
-  try{ allegCodaDrena(); }catch(_){}
+  try{ modmCodaDrena(forza); }catch(_){}
+  try{ allegCodaDrena(forza); }catch(_){}
+  try{ driveOpsDrena(forza); }catch(_){}
 }
 
 if(typeof window!=='undefined'){
-  window.addEventListener('online', function(){ _reteViva=true; riaggancioRete(); drenaTuttoSubito(); });
+  window.addEventListener('online', function(){ _reteViva=true; riaggancioRete(); drenaTuttoSubito(true); });
   window.addEventListener('offline', function(){
     _reteViva=false;
     if(currentUser) mostraAvvisoOffline();
@@ -2203,6 +2204,8 @@ function renderListWithPending(records,total,pg,silenzioso){
   if(silenzioso){
     merged.forEach(function(r){ if(!r.localPending) ricordaBaseRiga(r); });
     aggiornaElencoInPlace(merged);
+    // Le righe allegati seguono l'elenco: mai orfane, mai mancanti
+    try{ injectAttachRows(); }catch(_){}
   } else {
     drawRows(merged,null);
     // Impronte anche al disegno completo: senza, il primo aggiornamento
@@ -2901,7 +2904,7 @@ if(typeof document!=='undefined'){
     if(e.target===document.getElementById('mcoda')) chiudi('mcoda');
     if(e.target.closest && e.target.closest('#btnCodaClose,#btnCodaChiudi2')) chiudi('mcoda');
     if(e.target.closest && e.target.closest('#btnCodaInvia')){
-      drenaTuttoSubito();
+      drenaTuttoSubito(true);          // le pause per i fallimenti si azzerano
       setTimeout(disegnaElencoCoda, 1500);
     }
   });
@@ -3564,9 +3567,19 @@ function confDelete(){
   var deletedAtISO=new Date().toISOString();
   var body={deleted_at:deletedAtISO};
 
-  // UI ottimistica: nascondi subito la riga
+  // UI ottimistica: nascondi subito la riga E la sua riga allegati
+  // (lasciarla orfana in cima all'elenco era il difetto dello screenshot)
   var trEl=document.querySelector('tr[data-row="'+ri+'"]');
-  if(trEl)trEl.style.display='none';
+  if(trEl){
+    trEl.style.display='none';
+    var acc=trEl.nextElementSibling;
+    if(acc && acc.classList.contains('attach-row')) acc.style.display='none';
+  }
+  var accAltra=document.querySelector('tr.attach-row[data-for="'+ri+'"]');
+  if(accAltra) accAltra.style.display='none';
+
+  // I file su Drive seguono la chiamata nel cestino (e tornano col ripristino)
+  drivePerChiamata('trash', ri);
 
   // Aggiorna conteggio nell'info bar al volo
   var li=els.linfo||document.getElementById('linfo');
@@ -3686,6 +3699,8 @@ function renderTrashList(){
 }
 
 function trashRestoreOne(id,rowEl){
+  // I file su Drive tornano insieme alla chiamata
+  drivePerChiamata('untrash', id);
   if(typeof navigator!=='undefined'&&navigator.onLine===false){
     fb(false,'Offline','Impossibile ripristinare ora. Riprova quando hai connessione.');
     return;
@@ -3827,6 +3842,15 @@ function showUndoBanner(rowId){
     dismissed=true;
     // Rimuovi eventuale entry in coda (se l'eliminazione era stata accodata)
     syncDequeue(String(rowId));
+    // La riga (e la sua riga allegati) tornano visibili subito
+    var trV=document.querySelector('tr[data-row="'+rowId+'"]');
+    if(trV){
+      trV.style.display='';
+      var accV=trV.nextElementSibling;
+      if(accV && accV.classList.contains('attach-row')) accV.style.display='';
+    }
+    // E i file su Drive escono dal cestino
+    drivePerChiamata('untrash', rowId);
     // Ripristina: deleted_at = NULL
     var restoreBody={deleted_at:null};
     if(typeof navigator!=='undefined'&&navigator.onLine===false){
@@ -6329,8 +6353,14 @@ function allegCodaDrena(){
   if(_allegDrenaggio){ _allegDaRifare=true; return Promise.resolve(); }
   if(!isOnline() || !currentUser) return Promise.resolve();
   _allegDrenaggio=true;
-  return inSfondoDrive(allegCodaLeggi().then(function(righe){
-    var utili=righe.filter(function(r){ return String(r.chiamata_id).indexOf('local_')!==0; });
+  var forza=arguments.length>0 && arguments[0]===true;
+  return inSfondoDrive(risolviEtichetteProvvisorie().then(allegCodaLeggi).then(function(righe){
+    var adesso=Date.now();
+    var utili=righe.filter(function(r){
+      if(String(r.chiamata_id).indexOf('local_')===0) return false;
+      if(!forza && r.dopo && r.dopo>adesso) return false;   // in pausa dopo un fallimento
+      return true;
+    });
     // Niente da inviare: si esce SENZA interrogare il database
     if(!utili.length) return false;
     return ensureFreshToken().then(function(){
@@ -6368,6 +6398,16 @@ function allegCodaDrena(){
 
 // Invio di UN allegato. Il file locale si cancella solo quando la riga negli
 // allegati esiste davvero: se qualcosa va storto, resta e si riprova.
+// Un fallimento annota tentativi e prossimo orario: niente martellamento.
+function allegSegnaFallimento(rec, err){
+  rec.tentativi=(rec.tentativi||0)+1;
+  rec.dopo=Date.now()+prossimaPausa(rec.tentativi);
+  if(erroreDiAutorizzazione(err)){
+    rec.dopo=Date.now()+5*60000;      // senza permesso ritentare non serve
+    try{ driveMostraInvito(); }catch(_){}
+  }
+  return allegCodaScrivi(rec).catch(function(){}).then(function(){ return false; });
+}
 function allegInvia(rec){
   var caricamento;
   if(rec.drive_file_id){
@@ -6391,7 +6431,7 @@ function allegInvia(rec){
       // Solo ORA il file temporaneo puo sparire
       return allegCodaCancella(rec.id).then(function(){ return true; });
     });
-  }).catch(function(){ return false; });
+  }).catch(function(err){ return allegSegnaFallimento(rec, err); });
 }
 
 if(typeof window!=='undefined'){
@@ -6492,6 +6532,107 @@ function cercaFileOrfani(){
         });
       });
   });
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// CODA DELLE OPERAZIONI SU DRIVE — quando una chiamata va nel cestino o
+// ne esce, i suoi file su Drive devono seguirla. Se in quel momento manca
+// la linea (o Drive non risponde), l'operazione si annota qui e viene
+// eseguita appena possibile. Si annota la CHIAMATA, non i singoli file:
+// quali siano lo si chiede al database al momento buono.
+// ═══════════════════════════════════════════════════════════════════
+var DRIVE_OPS_KEY='driveOps_v1';
+function driveOpsLeggi(){
+  try{ return JSON.parse(localStorage.getItem(DRIVE_OPS_KEY)||'[]'); }catch(_){ return []; }
+}
+function driveOpsSalva(q){
+  try{ localStorage.setItem(DRIVE_OPS_KEY, JSON.stringify(q)); }catch(_){}
+}
+function driveOpsAccoda(op, chiamataId){
+  var q=driveOpsLeggi();
+  // Un cestina e un ripristina sulla stessa chiamata si annullano a vicenda:
+  // resta solo l'ultima volonta espressa.
+  q=q.filter(function(e){ return String(e.chiamata)!==String(chiamataId); });
+  q.push({op:op, chiamata:chiamataId, ts:Date.now(), tentativi:0, dopo:0});
+  driveOpsSalva(q);
+}
+// I file (allegati + Modulo M) di una chiamata, letti dal database
+function fileDiChiamata(chiamataId){
+  var elenco=[];
+  return sbFetch('allegati?chiamata_id=eq.'+chiamataId+'&select=drive_file_id')
+    .then(function(r){ return r.json(); })
+    .then(function(a){
+      if(Array.isArray(a)) a.forEach(function(x){ if(x.drive_file_id) elenco.push(x.drive_file_id); });
+      return sbFetch('moduli_m?chiamata_id=eq.'+chiamataId+'&select=drive_file_id');
+    })
+    .then(function(r){ return r.json(); })
+    .then(function(m){
+      if(Array.isArray(m)) m.forEach(function(x){ if(x.drive_file_id) elenco.push(x.drive_file_id); });
+      return elenco;
+    });
+}
+function ripristinaSuDrive(fileId){
+  return driveFetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=id',{
+    method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({trashed:false}), automatico:true
+  }).then(function(r){ if(!r.ok && r.status!==404) throw new Error('untrash_'+r.status); return true; });
+}
+function cestinaSuDriveAuto(fileId){
+  return driveFetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=id',{
+    method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({trashed:true}), automatico:true
+  }).then(function(r){ if(!r.ok && r.status!==404) throw new Error('trash_'+r.status); return true; });
+}
+// Esegue una singola annotazione: trova i file della chiamata e li sposta
+function driveOpsEsegui(e){
+  return fileDiChiamata(e.chiamata).then(function(ids){
+    if(!ids.length) return true;
+    var catena=Promise.resolve();
+    ids.forEach(function(id){
+      catena=catena.then(function(){
+        return (e.op==='untrash' ? ripristinaSuDrive(id) : cestinaSuDriveAuto(id));
+      });
+    });
+    return catena.then(function(){ return true; });
+  });
+}
+var _driveOpsInCorso=false;
+function driveOpsDrena(forza){
+  if(_driveOpsInCorso || !isOnline() || !currentUser) return Promise.resolve();
+  var q=driveOpsLeggi();
+  if(!q.length) return Promise.resolve();
+  _driveOpsInCorso=true;
+  var adesso=Date.now();
+  var catena=Promise.resolve();
+  q.forEach(function(e){
+    catena=catena.then(function(){
+      if(!forza && e.dopo && e.dopo>adesso) return;      // non e ancora il momento
+      return inSfondoDrive(function(){ return driveOpsEsegui(e); }).then(function(){
+        var resto=driveOpsLeggi().filter(function(x){ return !(x.op===e.op && String(x.chiamata)===String(e.chiamata)); });
+        driveOpsSalva(resto);
+      }).catch(function(err){
+        // resta in coda, con una pausa che cresce a ogni tentativo
+        var resto=driveOpsLeggi();
+        resto.forEach(function(x){
+          if(x.op===e.op && String(x.chiamata)===String(e.chiamata)){
+            x.tentativi=(x.tentativi||0)+1;
+            x.dopo=Date.now()+Math.min(10*60000, 30000*Math.pow(2, x.tentativi-1));
+          }
+        });
+        driveOpsSalva(resto);
+        var msg=String((err&&err.message)||'');
+        if(msg.indexOf('token')!==-1||msg.indexOf('popup')!==-1||msg.indexOf('401')!==-1) driveMostraInvito();
+      });
+    });
+  });
+  return catena.then(function(){ _driveOpsInCorso=false; })
+    .catch(function(){ _driveOpsInCorso=false; });
+}
+if(typeof window!=='undefined'){
+  setInterval(function(){ driveOpsDrena(); }, 45000);
+}
+// La chiamata segue il suo destino su Drive: subito se possibile, in coda se no
+function drivePerChiamata(op, chiamataId){
+  driveOpsAccoda(op, chiamataId);
+  if(isOnline()) setTimeout(function(){ driveOpsDrena(); }, 200);
 }
 
 // Passata automatica: una volta al giorno, in silenzio.
@@ -6595,6 +6736,7 @@ function injectAttachRows(){
     var row=tb.querySelector('tr[data-row="'+cid+'"]')
          || (String(cid).indexOf('local_')===0 ? tb.querySelector('tr[data-uuid="'+String(cid).slice(6)+'"]') : null);
     if(!row)return;
+    if(row.style.display==='none')return;    // chiamata appena cestinata: niente riga allegati
     var ar=document.createElement('tr');
     // Stesso sfondo della chiamata (pending giallo / done bianco): fa parte della stessa chiamata
     var stateClass=row.classList.contains('done')?'attach-done':'attach-pending';
@@ -7891,6 +8033,16 @@ function modmApplicaLocali(){
 }
 
 // ── Svuotamento della coda: appena c'e linea ──
+// Pausa crescente fra i tentativi: 30s, 1m, 2m, 4m... mai oltre 10 minuti.
+function prossimaPausa(tentativi){
+  return Math.min(10*60000, 30000*Math.pow(2, Math.max(0,(tentativi||1)-1)));
+}
+function erroreDiAutorizzazione(err){
+  var m=String((err&&err.message)||err||'');
+  return m.indexOf('token')!==-1 || m.indexOf('popup')!==-1 || m.indexOf('401')!==-1
+      || m.indexOf('no_session')!==-1 || m.indexOf('drive_not_configured')!==-1;
+}
+
 // Un modulo o un allegato agganciati a una chiamata «non ancora registrata»
 // restano fermi finche non si scopre il numero vero. Questo lo chiede al
 // server e rifa il collegamento: senza, dopo un riavvio dell'app resterebbero
@@ -7928,7 +8080,10 @@ function modmCodaDrena(){
   if(_modmDrenaggio){ _modmDaRifare=true; return Promise.resolve(); }
   if(!isOnline() || !currentUser) return Promise.resolve();
   _modmDrenaggio=true;
-  return inSfondoDrive(risolviEtichetteProvvisorie().then(modmCodaLeggi).then(function(righe){
+  var forza=arguments.length>0 && arguments[0]===true;
+  return inSfondoDrive(risolviEtichetteProvvisorie().then(modmCodaLeggi).then(function(righeTutte){
+    var adesso=Date.now();
+    var righe=righeTutte.filter(function(r){ return forza || !r.dopo || r.dopo<=adesso; });
     // Coda vuota: si esce SENZA interrogare il database (niente traffico sprecato)
     if(!righe.length) return false;
     return ensureFreshToken().then(function(){
@@ -8023,7 +8178,16 @@ function modmInvia(rec){
       }
       return modmCodaCancella(callId).then(function(){ return true; });
     });
-  }).catch(function(){ return false; });   // resta in coda, si riprova
+  }).catch(function(err){
+    // Resta in coda, ma con una pausa che cresce: niente martellamento
+    rec.tentativi=(rec.tentativi||0)+1;
+    rec.dopo=Date.now()+prossimaPausa(rec.tentativi);
+    if(erroreDiAutorizzazione(err)){
+      rec.dopo=Date.now()+5*60000;
+      try{ driveMostraInvito(); }catch(_){}
+    }
+    return modmCodaScrivi(rec).catch(function(){}).then(function(){ return false; });
+  });
 }
 
 // Se il PDF non era stato generato (librerie non disponibili in campagna),
