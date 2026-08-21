@@ -1956,6 +1956,7 @@ function loadRows(pg){
 function mapServerRow(r){
   return {
     id:r.id,rowIndex:r.id,
+    client_uuid:r.client_uuid||null,
     tsFormatted:formatTSFromISO(r.timestamp_chiamata),
     postazione:r.postazione||'',descrizione:r.descrizione||'',note:r.note||'',completato:!!r.completato,
     girata_a_user_id:r.girata_a_user_id||null,
@@ -1978,11 +1979,29 @@ function pendingInsertToRecord(e){
 }
 
 // Renderizza server rows + eventuali chiamate locali in attesa (in cima, solo pag.1 senza filtri)
+// Una copia locale la cui chiamata e gia sul server e solo un doppione:
+// si toglie dalla coda e si porta con se il Modulo M eventualmente compilato.
+function scartaLocaliGiaArrivate(inserts, records){
+  var suServer={};
+  (records||[]).forEach(function(r){ if(r && r.client_uuid) suServer[r.client_uuid]=r.id; });
+  var vive=[];
+  (inserts||[]).forEach(function(e){
+    var idVero=suServer[e.client_uuid];
+    if(idVero!==undefined && idVero!==null){
+      syncDequeueInsert(e.client_uuid);
+      modmRimappaLocale(e.client_uuid, idVero);
+    } else {
+      vive.push(e);
+    }
+  });
+  return vive;
+}
+
 function renderListWithPending(records,total,pg){
   var merged=records;
   var pendingCount=0;
   if(pg===1 && !currentFilters && !showIncompleteOnly){
-    var inserts=loadPendingInserts().map(pendingInsertToRecord);
+    var inserts=scartaLocaliGiaArrivate(loadPendingInserts(), records).map(pendingInsertToRecord);
     pendingCount=inserts.length;
     merged=inserts.concat(records);
   }
@@ -2003,9 +2022,10 @@ function renderListWithPending(records,total,pg){
 // Fallback quando il caricamento fallisce (offline / rete): mostra cache + pending,
 // MAI "Errore server" con JSON grezzo, MAI perdita delle chiamate locali.
 function renderOfflineFallback(pg, e){
-  var inserts=loadPendingInserts().map(pendingInsertToRecord);
   var cached=loadCachedRows();
   var serverRecs=(pg===1 && cached && cached.records)?cached.records.slice():[];
+  // Anche l'elenco in cache puo gia contenere la chiamata: niente doppioni
+  var inserts=scartaLocaliGiaArrivate(loadPendingInserts(), serverRecs).map(pendingInsertToRecord);
 
   // Applica le modifiche ancora in coda (update) sui record in cache: così un
   // reload OFFLINE mostra comunque le correzioni fatte (già salvate in coda).
@@ -2293,13 +2313,28 @@ function loadPendingInserts(){
 
 // Invio singolo di una insert (con rinnovo JWT + retry e gestione 409 idempotente).
 // Ritorna Promise<bool>: true = salvata sul server (o già presente), false = resta in coda.
+// Recupera il numero assegnato dal server a una chiamata appena inviata,
+// cosi il Modulo M compilato offline puo agganciarsi a quella vera.
+function agganciaNumeroVero(clientUuid){
+  return sbFetch('chiamate?client_uuid=eq.'+encodeURIComponent(clientUuid)+'&select=id')
+    .then(function(r){ return r.json(); })
+    .then(function(rows){
+      var id=(Array.isArray(rows)&&rows[0])?rows[0].id:null;
+      if(id==null) return false;
+      return modmRimappaLocale(clientUuid, id).then(function(spostato){
+        if(spostato) modmCodaDrena();
+        return true;
+      });
+    }).catch(function(){ return false; });
+}
+
 function syncOneInsert(clientUuid, body){
   markOwnWrite();
   var post=function(){
     return sbFetch('chiamate',{method:'POST',body:body,prefer:'return=minimal'});
   };
   return post().then(function(res){
-    if(res.ok || res.status===409){ syncDequeueInsert(clientUuid); return true; }
+    if(res.ok || res.status===409){ syncDequeueInsert(clientUuid); agganciaNumeroVero(clientUuid); return true; }
     if(res.status===401){
       return ensureFreshToken().then(function(){
         return post().then(function(r2){
@@ -2468,6 +2503,10 @@ function syncProcess(){
         return !okKeys[k];
       });
       syncSaveQueue(newQ);
+      // Le chiamate appena registrate portano con se il loro Modulo M
+      q2.forEach(function(e){
+        if(e.type==='insert' && okKeys['ins:'+e.client_uuid]) agganciaNumeroVero(e.client_uuid);
+      });
       syncRenderBadge();
       var anyOk=results.some(function(r){return r.ok;});
       // safeReloadRows: mai ridisegnare se ci sono modifiche non ancora salvate
@@ -2724,12 +2763,18 @@ function setupTableDelegation(){
       openMailChoice(mailEl.dataset.mail||mailEl.textContent, mailCallId);
       return;
     }
+    // Le chiamate non ancora inviate hanno un'etichetta «local_…»: va tenuta
+    // com'e, trasformarla in numero la renderebbe inservibile.
+    var idModulo=function(el){
+      var v=el.dataset.row||'';
+      return (v.indexOf('local_')===0) ? v : parseInt(v,10);
+    };
     var modmBtn2=t.closest('.iho-modm');
-    if(modmBtn2){ e.stopPropagation(); modmApri(parseInt(modmBtn2.dataset.row)); return; }
+    if(modmBtn2){ e.stopPropagation(); modmApri(idModulo(modmBtn2)); return; }
     var modmLink=t.closest('.modm-link');
-    if(modmLink){ e.stopPropagation(); modmApri(parseInt(modmLink.dataset.row)); return; }
+    if(modmLink){ e.stopPropagation(); modmApri(idModulo(modmLink)); return; }
     var modmDel=t.closest('.modm-del');
-    if(modmDel){ e.stopPropagation(); modmPromptDelete(parseInt(modmDel.dataset.row)); return; }
+    if(modmDel){ e.stopPropagation(); modmPromptDelete(idModulo(modmDel)); return; }
 
     var attBtn=t.closest('.iho-attach');
     if(attBtn){
@@ -6225,8 +6270,16 @@ function modmDisegnaSegni(){
 }
 
 // Precompilazione dai dati della chiamata
+// La riga di una chiamata: per quelle gia registrate si cerca per numero,
+// per quelle ancora da inviare per impronta.
+function modmTrovaRiga(callId){
+  var s=String(callId||'');
+  if(s.indexOf('local_')===0) return document.querySelector('tr[data-uuid="'+s.slice(6)+'"]');
+  return document.querySelector('tr[data-row="'+s+'"]');
+}
+
 function modmPrecompila(callId){
-  var tr=document.querySelector('tr[data-row="'+callId+'"]');
+  var tr=modmTrovaRiga(callId);
   var d={};
   var oggi=new Date();
   var p=function(n){return String(n).padStart(2,'0');};
@@ -6918,6 +6971,33 @@ if(typeof window!=='undefined'){
   setInterval(function(){ modmCodaDrena(); }, 60000);
 }
 
+// Una chiamata scritta offline non ha ancora un numero: il Modulo M compilato
+// sopra vive sotto l'etichetta provvisoria «local_…». Appena la chiamata viene
+// registrata, il modulo trasloca sul numero vero e parte con gli altri.
+function modmRimappaLocale(clientUuid, idVero){
+  if(!clientUuid || idVero==null) return Promise.resolve(false);
+  var chiaveVecchia='local_'+clientUuid;
+  var vecchio=moduliMLocali[chiaveVecchia];
+  var applica=function(rec){
+    if(!rec) return false;
+    var nuovo={};
+    Object.keys(rec).forEach(function(k){ nuovo[k]=rec[k]; });
+    nuovo.chiamata_id=idVero;
+    delete moduliMLocali[chiaveVecchia];
+    delete moduliMByCall[chiaveVecchia];
+    moduliMLocali[String(idVero)]=nuovo;
+    return modmCodaScrivi(nuovo).then(function(){
+      return modmCodaCancella(chiaveVecchia);
+    }).then(function(){ modmApplicaLocali(); return true; });
+  };
+  if(vecchio) return Promise.resolve(applica(vecchio));
+  // potrebbe essere solo su disco (app riaperta): lo cerco li
+  return modmCodaLeggi().then(function(righe){
+    var r=righe.filter(function(x){ return String(x.chiamata_id)===chiaveVecchia; })[0];
+    return r ? applica(r) : false;
+  }).catch(function(){ return false; });
+}
+
 // Chiede conferma spiegando che cosa comporta il salvataggio: senza firma
 // il modulo resta una bozza correggibile, con la firma si chiude per sempre.
 function modmChiediSalva(poiChiudi){
@@ -6970,9 +7050,12 @@ function modmSalva(poiChiudi){
 
     if(!isOnline()){
       setModalBusy('mmodm', false);
+      var chiamataLocale=String(callId).indexOf('local_')===0;
       fb(true, conFirma ? 'Modulo M firmato (in attesa di linea)' : 'Bozza salvata sul dispositivo',
-         conFirma ? 'Firma e documento sono al sicuro sul dispositivo: partiranno da soli appena torna la linea.'
-                  : 'Resta modificabile. Verra registrato appena torna la linea.');
+         (conFirma ? 'Firma e documento sono al sicuro sul dispositivo. ' : 'Resta modificabile. ')
+         +(chiamataLocale
+            ? 'Partira insieme alla chiamata, appena questa viene registrata.'
+            : 'Partira da solo appena torna la linea.'));
       if(poiChiudi || conFirma){ chiudi('mmodm'); modmCallId=null; }
       injectModmUi();
       return true;
@@ -7070,8 +7153,10 @@ function modmElimina(){
 function injectModmUi(){
   var tb=els.tbody||document.getElementById('tbody');
   if(!tb)return;
-  tb.querySelectorAll('tr[data-row]').forEach(function(tr){
-    var id=tr.dataset.row; if(!id)return;
+  tb.querySelectorAll('tr[data-row], tr.local-pending').forEach(function(tr){
+    // Le chiamate non ancora inviate non hanno un numero: si usa l'impronta
+    var id=tr.dataset.row || (tr.dataset.uuid ? 'local_'+tr.dataset.uuid : '');
+    if(!id)return;
     var salvato=moduliMByCall[String(id)];
     var azioni=tr.querySelector('.sc');
     var btn=tr.querySelector('.iho-modm');
@@ -7109,7 +7194,7 @@ function injectModmUi(){
         b.dataset.row=id;
         b.title='Compila il Modulo M (Relazione Medica)';
         b.innerHTML=svgModuloM();
-        var att=azioni.querySelector('.iho-attach');
+        var att=azioni.querySelector('.iho-attach') || azioni.querySelector('.idel-local');
         if(att) azioni.insertBefore(b,att); else azioni.appendChild(b);
       }
     }
