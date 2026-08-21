@@ -7985,6 +7985,8 @@ function modmInvia(rec){
         return pulizia.then(function(){ return {f:f, nome:nome, size:blob.size}; });
       });
     }).then(function(up){
+      // Documento non prodotto: si prosegue lo stesso, i dati contano di piu
+      if(!up) return null;
       var vecchioAll=esistente && esistente.allegato_id;
       return sbFetch('allegati?select=id',{
         method:'POST', prefer:'return=representation',
