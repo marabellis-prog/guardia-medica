@@ -1678,3 +1678,22 @@ body.pagina-ferma{overflow:hidden}
 html,body{overscroll-behavior-y:none}
 .mov{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 .mbox,.modm-palco,.modm-sez-corpo,.mail-exist-list{overscroll-behavior:contain}
+
+/* Allegato al sicuro sul dispositivo, in attesa di salire su Drive */
+.attach-item.attach-attesa{
+  background:var(--wabg,#fff4e0);color:var(--wa,#b06a00);
+  border:1px dashed rgba(176,106,0,.45);cursor:default;
+}
+.attach-attesa-tag{
+  font-size:.6rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;
+  padding:1px 5px;border-radius:999px;background:rgba(176,106,0,.16);margin-left:4px;
+}
+[data-theme="dark"] .attach-item.attach-attesa{background:rgba(255,167,38,.14);color:#ffb74d;border-color:rgba(255,183,77,.4)}
+/* Avviso dentro la finestra «Allega file» quando non c'è linea */
+.attach-offline{
+  display:flex;align-items:center;gap:8px;margin:.6rem 0 .2rem;
+  padding:8px 11px;border-radius:10px;font-size:.8rem;line-height:1.35;
+  background:var(--wabg,#fff4e0);color:var(--wa,#b06a00);border:1px solid rgba(176,106,0,.3);
+}
+.attach-offline svg{flex-shrink:0}
+[data-theme="dark"] .attach-offline{background:rgba(255,167,38,.13);color:#ffb74d;border-color:rgba(255,183,77,.32)}
