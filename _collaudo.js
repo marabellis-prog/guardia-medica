@@ -280,7 +280,18 @@ B.avvia = function(){
   return B.pulisciTutto();
 };
 
+// Azzera il mondo finto SUL POSTO: i sostituti tengono un riferimento
+// all'oggetto stato, quindi non lo si puo sostituire, solo svuotare.
+B.azzeraMondo = function(){
+  var S=B.stato; if(!S) return;
+  S.linea=true; S.drive={}; S.driveSeq=0; S.driveRompe=0; S.dbRompe=0;
+  S.pdfRompe=false; S.pdfLento=false;
+  S.db.chiamate.length=0; S.db.allegati.length=0; S.db.moduli.length=0;
+  S.idChiamata=1000; S.idAllegato=5000; S.chiamateAlServer.length=0; S.log.length=0;
+};
+
 B.pulisciTutto = function(){
+  B.azzeraMondo();
   ['syncQueue_v1','newCallDraft_v1','chiamateCache_v1','gm_profilo_v1','postCache_v1',
    'driveTok_v1','ultimaPuliziaDrive_v1','lastTrashPurge_v1'].forEach(function(k){ localStorage.removeItem(k); });
   window.moduliMByCall = {}; window.moduliMLocali = {}; window.allegatiLocali = {}; window.attachmentsByCall = {};
