@@ -1697,3 +1697,19 @@ html,body{overscroll-behavior-y:none}
 }
 .attach-offline svg{flex-shrink:0}
 [data-theme="dark"] .attach-offline{background:rgba(255,167,38,.13);color:#ffb74d;border-color:rgba(255,183,77,.32)}
+
+/* Rotellina: si sta inviando qualcosa in questo momento */
+.sync-rotella{
+  width:14px;height:14px;flex-shrink:0;display:inline-block;
+  border:2px solid currentColor;border-top-color:transparent;border-radius:50%;
+  animation:syncGira .8s linear infinite;
+}
+.sync-rotella.piccola{width:11px;height:11px;border-width:1.8px}
+@keyframes syncGira{to{transform:rotate(360deg)}}
+.sync-badge.in-corso{background:#1565c0;color:#fff;border-color:rgba(255,255,255,.25)}
+[data-theme="dark"] .sync-badge.in-corso{background:#1565c0;color:#fff}
+/* L'allegato che sta salendo proprio adesso */
+.attach-item.attach-sale{
+  background:rgba(21,101,192,.14);color:#1565c0;border-style:solid;border-color:rgba(21,101,192,.4);
+}
+[data-theme="dark"] .attach-item.attach-sale{background:rgba(100,181,246,.16);color:#64b5f6;border-color:rgba(100,181,246,.42)}
