@@ -6417,6 +6417,13 @@ function allegInvia(rec){
   if(rec.drive_file_id){
     // gia salito su Drive in un tentativo precedente: non si ricarica
     caricamento=Promise.resolve({id:rec.drive_file_id, name:rec.nome});
+  } else if(!rec.blob){
+    // Voce senza file e senza caricamento fatto: non potra mai riuscire.
+    // Meglio toglierla e dirlo, che farla girare a vuoto per sempre.
+    return allegCodaCancella(rec.id).then(function(){
+      try{ fb(false,'Allegato perso','Il file «'+(rec.nome||'?')+'» non è più nella memoria del dispositivo e va allegato di nuovo.'); }catch(_){}
+      return false;
+    });
   } else {
     var file=new File([rec.blob], rec.nome, {type:rec.tipo||'application/octet-stream'});
     caricamento=driveUpload(file).then(function(f){
