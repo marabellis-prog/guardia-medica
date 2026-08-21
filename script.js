@@ -275,6 +275,7 @@ function riaggancioRete(){
     modmCodaDrena();
     safeReloadRows();
     driveWarmup();
+    scaldaLibreriePdf();     // chi era partito offline non le aveva ancora
   });
 }
 if(typeof window!=='undefined'){
