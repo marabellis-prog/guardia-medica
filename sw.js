@@ -59,6 +59,10 @@ self.addEventListener('fetch', function(event) {
   // sia SW che CDN. Cacharle riempirebbe la storage di entry duplicate.
   if (url.search.indexOf('_check=') !== -1 || url.search.indexOf('_r=') !== -1) return;
 
+  // Controllo della linea: deve andare SEMPRE in rete. Servito dalla cache
+  // direbbe "c'e connessione" anche in mezzo alla campagna.
+  if (url.search.indexOf('rete=') !== -1) return;
+
   // Google s2 favicons (per i link rapidi nav) → cache-first lungo
   if (url.hostname === 'www.google.com' && url.pathname.indexOf('/s2/favicons') === 0) {
     event.respondWith(staleWhileRevalidate(event.request));
