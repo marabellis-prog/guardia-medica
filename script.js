@@ -5485,7 +5485,72 @@ function initDriveTokenClient(){
 //   serve davvero (token mancante/scaduto), non ad ogni operazione. (NB: prompt:'' con
 //   GIS fallisce senza UI se non c'è già un consenso → per questo non si usa.)
 var DRIVE_TOK_KEY='driveTok_v1';
-function getDriveToken(){
+
+function ricordaToken(tok, durataSec){
+  driveAccessToken=tok;
+  driveTokenExpiry=Date.now()+((durataSec||3600)*1000);
+  try{ localStorage.setItem(DRIVE_TOK_KEY, JSON.stringify({t:driveAccessToken, exp:driveTokenExpiry})); }catch(_){}
+  driveNascondiInvito();
+  return driveAccessToken;
+}
+
+// ── La cassaforte: il permesso duraturo sta sul server, mai nel browser ──
+// Autorizzata una volta, da qui in poi ogni dispositivo chiede il proprio
+// lasciapassare e lo riceve senza alcuna finestra.
+var _cassafortePromessa=null;
+var cassaforteVuota=false;      // sappiamo gia che nessuno ha ancora autorizzato
+function tokenDaCassaforte(){
+  if(cassaforteVuota) return Promise.reject(new Error('cassaforte_vuota'));
+  if(_cassafortePromessa) return _cassafortePromessa;
+  _cassafortePromessa=fetch(SUPABASE_URL+'/functions/v1/google-token',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,
+             'Authorization':'Bearer '+(currentJwt||SUPABASE_ANON_KEY)},
+    body:JSON.stringify({azione:'token'})
+  }).then(function(r){ return r.json().then(function(j){ return {stato:r.status, dati:j}; }); })
+    .then(function(x){
+      _cassafortePromessa=null;
+      if(x.stato===404 || (x.dati && x.dati.errore==='non_autorizzata')){
+        cassaforteVuota=true;                       // serve la prima autorizzazione
+        throw new Error('cassaforte_vuota');
+      }
+      if(!x.dati || !x.dati.access_token) throw new Error('cassaforte_ko');
+      return ricordaToken(x.dati.access_token, x.dati.expires_in);
+    }).catch(function(e){ _cassafortePromessa=null; throw e; });
+  return _cassafortePromessa;
+}
+
+// Chiede il permesso a Google dentro il browser.
+// silenzioso = nessuna finestra: riesce se il consenso e gia stato dato.
+function tokenDaBrowser(silenzioso){
+  if(!driveConfigured()) return Promise.reject(new Error('drive_not_configured'));
+  return initDriveTokenClient().then(function(){
+    return new Promise(function(resolve,reject){
+      var chiuso=false;
+      var scadenza=setTimeout(function(){
+        if(chiuso) return; chiuso=true; reject(new Error('token_lento'));
+      }, silenzioso ? 8000 : 120000);
+      driveTokenClient.callback=function(resp){
+        if(chiuso) return; chiuso=true; clearTimeout(scadenza);
+        if(resp && resp.access_token) resolve(ricordaToken(resp.access_token, resp.expires_in));
+        else reject(new Error((resp&&resp.error)||'no_token'));
+      };
+      driveTokenClient.error_callback=function(err){
+        if(chiuso) return; chiuso=true; clearTimeout(scadenza);
+        reject(new Error((err&&err.type)||'popup_error'));
+      };
+      try{
+        // prompt vuoto = «rinnova senza disturbare»; Google apre la finestra
+        // solo se il consenso manca davvero.
+        driveTokenClient.requestAccessToken(silenzioso ? {prompt:''} : {});
+      }catch(e){ if(!chiuso){ chiuso=true; clearTimeout(scadenza); reject(e); } }
+    });
+  });
+}
+
+// interattivo=false → non aprire MAI finestre (controlli di sfondo)
+function getDriveToken(interattivo){
+  if(interattivo===undefined) interattivo=true;
   if(driveAccessToken && Date.now() < driveTokenExpiry-60000) return Promise.resolve(driveAccessToken);
   try{
     var cached=JSON.parse(localStorage.getItem(DRIVE_TOK_KEY)||'null');
@@ -5494,21 +5559,67 @@ function getDriveToken(){
       return Promise.resolve(driveAccessToken);
     }
   }catch(_){}
-  if(!driveConfigured()) return Promise.reject(new Error('drive_not_configured'));
-  return initDriveTokenClient().then(function(){
-    return new Promise(function(resolve,reject){
-      driveTokenClient.callback=function(resp){
-        if(resp && resp.access_token){
-          driveAccessToken=resp.access_token;
-          driveTokenExpiry=Date.now()+((resp.expires_in||3600)*1000);
-          try{ localStorage.setItem(DRIVE_TOK_KEY, JSON.stringify({t:driveAccessToken, exp:driveTokenExpiry})); }catch(_){}
-          driveNascondiInvito();
-          resolve(driveAccessToken);
-        } else { reject(new Error((resp&&resp.error)||'no_token')); }
-      };
-      driveTokenClient.error_callback=function(err){ reject(new Error((err&&err.type)||'popup_error')); };
-      try{ driveTokenClient.requestAccessToken(); }catch(e){ reject(e); }
+  // 1) la cassaforte: nessuna finestra, funziona su ogni dispositivo
+  return tokenDaCassaforte()
+    .catch(function(){ return tokenDaBrowser(true); })    // 2) rinnovo silenzioso
+    .catch(function(e){
+      if(interattivo) return tokenDaBrowser(false);       // 3) solo ora si chiede
+      driveMostraInvito();
+      throw e;
     });
+}
+
+// Prima autorizzazione, quella che si fa UNA VOLTA SOLA: si chiede a Google un
+// permesso duraturo e lo si consegna alla cassaforte sul server.
+function autorizzaDrivePerSempre(){
+  if(!driveConfigured()) return Promise.reject(new Error('drive_not_configured'));
+  return loadGisLibrary().then(function(){
+    return new Promise(function(resolve,reject){
+      var cliente=google.accounts.oauth2.initCodeClient({
+        client_id: GOOGLE_OAUTH_CLIENT_ID,
+        scope: 'https://www.googleapis.com/auth/drive.file',
+        ux_mode: 'popup',
+        select_account: false,
+        callback: function(resp){
+          if(resp && resp.code) resolve(resp.code);
+          else reject(new Error((resp&&resp.error)||'no_code'));
+        },
+        error_callback: function(err){ reject(new Error((err&&err.type)||'popup_error')); }
+      });
+      try{ cliente.requestCode(); }catch(e){ reject(e); }
+    });
+  }).then(function(code){
+    return fetch(SUPABASE_URL+'/functions/v1/google-token',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,
+               'Authorization':'Bearer '+(currentJwt||SUPABASE_ANON_KEY)},
+      body:JSON.stringify({azione:'autorizza', code:code})
+    });
+  }).then(function(r){ return r.json(); }).then(function(j){
+    if(j && j.errore==='serve_riautorizzazione'){
+      // Google non ha dato il permesso duraturo perche l'accesso era gia
+      // concesso: lo si revoca e si riautorizza. Succede una volta sola.
+      throw Object.assign(new Error('serve_riautorizzazione'), {token:j.access_token});
+    }
+    if(!j || !j.access_token) throw new Error((j&&j.errore)||'cassaforte_ko');
+    cassaforteVuota=false;
+    return ricordaToken(j.access_token, j.expires_in);
+  });
+}
+
+// Revoca l'accesso attuale e riautorizza da zero: serve quando Google
+// riconosce un consenso vecchio e non rilascia il permesso duraturo.
+function riautorizzaDriveDaZero(tokenDaRevocare){
+  return new Promise(function(resolve){
+    try{
+      if(tokenDaRevocare && window.google && google.accounts && google.accounts.oauth2){
+        google.accounts.oauth2.revoke(tokenDaRevocare, function(){ resolve(); });
+        setTimeout(resolve, 2500);
+      } else resolve();
+    }catch(_){ resolve(); }
+  }).then(function(){
+    clearDriveToken();
+    return autorizzaDrivePerSempre();
   });
 }
 // ── Controllo autorizzazione all'avvio ──────────────────────────────
@@ -5527,9 +5638,13 @@ function driveWarmup(forza){
   if(!driveConfigured() || !isOnline() || !currentUser) return;
   if(!forza && Date.now()-driveWarmupUltimo<5*60000) return;   // max una volta ogni 5 minuti
   driveWarmupUltimo=Date.now();
-  if(!driveTokenValidoOra()){ driveMostraInvito(); return; }
+  if(!driveTokenValidoOra()){
+    // Prima di disturbare: cassaforte e rinnovo silenzioso, senza finestre
+    getDriveToken(false).then(function(){ driveNascondiInvito(); }).catch(function(){ driveMostraInvito(); });
+    return;
+  }
   // Il token sembra buono: verifica vera con una chiamata leggerissima
-  getDriveToken().then(function(tok){
+  getDriveToken(false).then(function(tok){
     return fetch('https://www.googleapis.com/drive/v3/about?fields=user',{headers:{'Authorization':'Bearer '+tok}});
   }).then(function(r){
     if(r.status===401 || r.status===403){ clearDriveToken(); driveMostraInvito(); }
@@ -5547,10 +5662,22 @@ function driveMostraInvito(){
   b.addEventListener('click',function(){
     if(b.classList.contains('busy')) return;
     b.classList.add('busy');
-    clearDriveToken();                              // forza un token nuovo di zecca
-    getDriveToken().then(function(){
+    clearDriveToken();
+    // Si autorizza UNA volta sola: il permesso duraturo va in cassaforte sul
+    // server e da li in poi vale per questo e per ogni altro dispositivo.
+    autorizzaDrivePerSempre().catch(function(e){
+      // Consenso vecchio in mezzo: si revoca e si rifa, una volta sola
+      if(e && e.message==='serve_riautorizzazione') return riautorizzaDriveDaZero(e.token);
+      throw e;
+    }).then(function(){
       driveNascondiInvito();
-      fb(true,'Google Drive attivo','Allegati e Moduli M sono pronti.');
+      fb(true,'Google Drive autorizzato','Fatto una volta sola: da ora vale su questo e su ogni altro dispositivo, senza piu richieste.');
+    }).catch(function(e){
+      // Se la cassaforte non e disponibile si ripiega sul permesso di un'ora
+      return getDriveToken(true).then(function(){
+        driveNascondiInvito();
+        fb(true,'Google Drive attivo','Allegati e Moduli M sono pronti.');
+      });
     }).catch(function(){
       b.classList.remove('busy');
       fb(false,'Autorizzazione non riuscita','Tocca di nuovo l\'avviso per riprovare.');
@@ -5581,7 +5708,8 @@ function driveFetch(url,opts){
     // Token scaduto/revocato → invalida cache e riprova UNA volta con token fresco
     if(r.status===401){
       clearDriveToken();
-      return getDriveToken().then(doIt);
+      cassaforteVuota=false;      // riprova anche la cassaforte
+      return getDriveToken(true).then(doIt);
     }
     return r;
   });
