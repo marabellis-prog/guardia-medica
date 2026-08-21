@@ -1389,6 +1389,11 @@ document.addEventListener('DOMContentLoaded',function(){
     var el=document.getElementById(id);
     if(el){ attachPlainTextArea(el); el.addEventListener('input',saveDraftDebounced); }
   });
+  // Postazione e data/ora fanno parte della bozza quanto il testo
+  var selPostBozza=document.getElementById('selPost');
+  if(selPostBozza) selPostBozza.addEventListener('change', saveDraftNow);
+  var dtxtBozza=document.getElementById('dtxt');
+  if(dtxtBozza) dtxtBozza.addEventListener('input', saveDraftDebounced);
 
   // Unsaved 1
   var btn1Discard=document.getElementById('btn1Discard');
@@ -1445,19 +1450,7 @@ document.addEventListener('DOMContentLoaded',function(){
 
   // Prima di chiudere la tab/finestra: salva tutto il dirtyMap nella coda offline
   // (così le modifiche degli ultimi 1.5s che non sono ancora state autosalvate non si perdono)
-  window.addEventListener('beforeunload',function(){
-    var keys=Object.keys(dirtyMap);
-    keys.forEach(function(k){
-      var info=dirtyMap[k];if(!info||!info.tr)return;
-      if(!document.body.contains(info.tr))return;
-      var body=buildPatchBodyFromRow(info.tr);
-      if(body)syncEnqueue(k,body);
-    });
-    // Flush immediato delle modifiche alle righe locali (in attesa), per non
-    // perdere l'ultimo carattere digitato se si chiude prima del debounce.
-    var lp=document.querySelectorAll('tr.local-pending');
-    for(var i=0;i<lp.length;i++){ try{ saveLocalRowNow(lp[i]); }catch(_e){} }
-  });
+  window.addEventListener('beforeunload', metti_al_sicuro_tutto);
 
   // Badge "in coda di sync" è basato su localStorage, non richiede auth
   syncRenderBadge();
@@ -2339,19 +2332,27 @@ var DRAFT_KEY='newCallDraft_v1';
 var _draftTimer=null;
 function saveDraftDebounced(){
   if(_draftTimer)clearTimeout(_draftTimer);
-  _draftTimer=setTimeout(saveDraftNow,400);
+  _draftTimer=setTimeout(saveDraftNow,250);
 }
 function saveDraftNow(){
   try{
+    if(_draftTimer){ clearTimeout(_draftTimer); _draftTimer=null; }
     var d=(document.getElementById('txd')||{}).value||'';
     var n=(document.getElementById('txn')||{}).value||'';
     var dtEl=document.getElementById('dtxt');
     var dt=dtEl?(dtEl.innerText||''):'';
+    var selP=document.getElementById('selPost');
+    var p=selP?(selP.value||''):'';
     if(!d.trim() && !n.trim()){ localStorage.removeItem(DRAFT_KEY); return; }
-    localStorage.setItem(DRAFT_KEY, JSON.stringify({d:d,n:n,dt:dt,ts:Date.now()}));
+    // La postazione va conservata: senza, alla riapertura il salvataggio
+    // verrebbe rifiutato e bisognerebbe ricordarsela a mente.
+    localStorage.setItem(DRAFT_KEY, JSON.stringify({d:d,n:n,dt:dt,p:p,ts:Date.now()}));
   }catch(_){}
 }
-function clearDraft(){ try{ localStorage.removeItem(DRAFT_KEY); }catch(_){} }
+function clearDraft(){
+  try{ localStorage.removeItem(DRAFT_KEY); }catch(_){}
+  var b=document.getElementById('draftBanner'); if(b) b.remove();
+}
 function restoreDraft(){
   try{
     var raw=localStorage.getItem(DRAFT_KEY); if(!raw)return;
@@ -2362,10 +2363,79 @@ function restoreDraft(){
     if(dtx && o.dt && o.dt.trim() && (dtx.textContent==='—' || !dtx.textContent.trim())){
       dtx.textContent=o.dt; attachFormDateListeners();
     }
-    if(o.d || o.n){
-      fb(true,'Bozza recuperata','Ho ripristinato la chiamata che stavi scrivendo. Controlla i dati e premi Salva.');
+    var selP=document.getElementById('selPost');
+    if(selP && o.p && !selP.value){
+      // la lista postazioni potrebbe non essere ancora pronta: si riprova
+      var metti=function(giro){
+        if(selP.querySelector('option[value="'+String(o.p).replace(/"/g,'\\"')+'"]')){ selP.value=o.p; showComuni(); return; }
+        if(giro<10) setTimeout(function(){ metti(giro+1); }, 300);
+      };
+      metti(0);
+    }
+    mostraBozzaRecuperata(o);
+  }catch(_){}
+}
+
+// Avviso che RESTA finche non decidi: una bozza recuperata non deve
+// scomparire dopo due secondi come un messaggio qualsiasi.
+function mostraBozzaRecuperata(o){
+  if(document.getElementById('draftBanner')) return;
+  var quando='';
+  try{
+    if(o && o.ts){
+      var d=new Date(o.ts), pd=function(x){return String(x).padStart(2,'0');};
+      quando=' del '+pd(d.getDate())+'/'+pd(d.getMonth()+1)+' alle '+pd(d.getHours())+':'+pd(d.getMinutes());
     }
   }catch(_){}
+  var b=document.createElement('div');
+  b.id='draftBanner';
+  b.className='draft-banner';
+  b.innerHTML='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v6h6"/><path d="M3.5 9a9 9 0 1 0 2.1-3.4L3 9"/></svg>'
+    +'<span><b>Chiamata recuperata</b>'+esc(quando)+' &mdash; era rimasta a met&agrave;.</span>'
+    +'<button type="button" class="draft-b draft-ok" id="btnDraftSalva">Salva ora</button>'
+    +'<button type="button" class="draft-b draft-no" id="btnDraftScarta">Scarta</button>';
+  document.body.appendChild(b);
+  var salvaOra=document.getElementById('btnDraftSalva');
+  if(salvaOra) salvaOra.addEventListener('click', function(){
+    var f=document.getElementById('txd');
+    if(f) f.scrollIntoView({block:'center'});
+    salva();      // se manca qualcosa, e salva() stessa a segnalarlo
+  });
+  var scarta=document.getElementById('btnDraftScarta');
+  if(scarta) scarta.addEventListener('click', function(){
+    ['txd','txn'].forEach(function(id){ var e=document.getElementById(id); if(e) e.value=''; });
+    clearDraft();
+  });
+}
+
+// ── Tutto al sicuro, adesso ──────────────────────────────────────────
+// Chiamata quando l'app sta per sparire (schermo bloccato, cambio app,
+// browser chiuso dal sistema): mette in cassaforte la bozza, le modifiche
+// alle righe e le chiamate locali ancora in attesa.
+function metti_al_sicuro_tutto(){
+  try{ saveDraftNow(); }catch(_){}
+  try{
+    Object.keys(dirtyMap||{}).forEach(function(k){
+      var info=dirtyMap[k]; if(!info||!info.tr) return;
+      if(!document.body.contains(info.tr)) return;
+      var body=buildPatchBodyFromRow(info.tr);
+      if(body && Object.keys(body).length) syncEnqueue(k, body);
+    });
+  }catch(_){}
+  try{
+    var lp=document.querySelectorAll('tr.local-pending');
+    for(var i=0;i<lp.length;i++){ try{ saveLocalRowNow(lp[i]); }catch(_e){} }
+  }catch(_){}
+}
+if(typeof window!=='undefined'){
+  // Su iPhone e iPad `beforeunload` spesso NON scatta (schermo bloccato,
+  // app chiusa dal sistema). pagehide e visibilitychange invece si.
+  window.addEventListener('pagehide', metti_al_sicuro_tutto);
+  window.addEventListener('freeze', metti_al_sicuro_tutto);
+  window.addEventListener('blur', metti_al_sicuro_tutto);
+  document.addEventListener('visibilitychange', function(){
+    if(document.hidden) metti_al_sicuro_tutto();
+  });
 }
 
 function syncProcess(){
