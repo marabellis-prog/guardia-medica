@@ -5844,9 +5844,34 @@ function tokenDaBrowser(silenzioso){
   });
 }
 
+// Quante operazioni di sfondo sono in corso: finche e maggiore di zero
+// nessuna finestra di Google puo aprirsi.
+var driveInSfondo=0;
+function inSfondoDrive(promessa){
+  driveInSfondo++;
+  var giu=function(v){ driveInSfondo=Math.max(0,driveInSfondo-1); return v; };
+  return promessa.then(giu, function(e){ giu(); throw e; });
+}
+// Distinguere «sto scrivendo» da «ho appena toccato un comando»: nel primo
+// caso nessuna finestra puo aprirsi, nel secondo e l'utente che l'ha chiesta.
+var _ultimoTasto=0, _ultimoTocco=0;
+if(typeof document!=='undefined'){
+  document.addEventListener('keydown', function(){ _ultimoTasto=Date.now(); }, true);
+  document.addEventListener('pointerdown', function(){ _ultimoTocco=Date.now(); }, true);
+  document.addEventListener('mousedown', function(){ _ultimoTocco=Date.now(); }, true);
+}
+function staScrivendo(){
+  // Un tocco piu recente dell'ultimo tasto: e un comando dato adesso, si passa
+  if(_ultimoTocco > _ultimoTasto && (Date.now()-_ultimoTocco) < 3000) return false;
+  return (Date.now()-_ultimoTasto) < 4000;
+}
+
 // interattivo=false → non aprire MAI finestre (controlli di sfondo)
 function getDriveToken(interattivo){
   if(interattivo===undefined) interattivo=true;
+  // Nessuna finestra a sorpresa: né durante un invio automatico, né mentre
+  // stai scrivendo. In quei casi si accende l'invito e si riprova dopo.
+  if(interattivo && (driveInSfondo>0 || staScrivendo())) interattivo=false;
   if(driveAccessToken && Date.now() < driveTokenExpiry-60000) return Promise.resolve(driveAccessToken);
   try{
     var cached=JSON.parse(localStorage.getItem(DRIVE_TOK_KEY)||'null');
@@ -5940,12 +5965,12 @@ function driveWarmup(forza){
     return;
   }
   // Il token sembra buono: verifica vera con una chiamata leggerissima
-  getDriveToken(false).then(function(tok){
+  inSfondoDrive(getDriveToken(false).then(function(tok){
     return fetch('https://www.googleapis.com/drive/v3/about?fields=user',{headers:{'Authorization':'Bearer '+tok}});
   }).then(function(r){
     if(r.status===401 || r.status===403){ clearDriveToken(); driveMostraInvito(); }
     else if(r.ok){ driveNascondiInvito(); }
-  }).catch(function(){ /* rete instabile: non disturbare */ });
+  })).catch(function(){ /* rete instabile: non disturbare */ });
 }
 function driveMostraInvito(){
   if(document.getElementById('driveBanner')) return;
@@ -6000,12 +6025,15 @@ function driveFetch(url,opts){
     headers['Authorization']='Bearer '+token;
     return fetch(url,{method:opts.method||'GET',headers:headers,body:opts.body});
   };
-  return getDriveToken().then(doIt).then(function(r){
-    // Token scaduto/revocato → invalida cache e riprova UNA volta con token fresco
+  // Se chi chiama sta lavorando di sfondo, nessuna finestra: al massimo
+  // l'operazione fallisce e si riprova al giro dopo.
+  var puoChiedere = (opts.automatico===true) ? false : true;
+  return getDriveToken(puoChiedere).then(doIt).then(function(r){
+    // Permesso scaduto o revocato → si butta la copia e si riprova UNA volta
     if(r.status===401){
       clearDriveToken();
-      cassaforteVuota=false;      // riprova anche la cassaforte
-      return getDriveToken(true).then(doIt);
+      cassaforteVuota=false;      // si ritenta anche la cassaforte
+      return getDriveToken(puoChiedere).then(doIt);
     }
     return r;
   });
@@ -6141,6 +6169,8 @@ function allegCaricaCodaInMappa(){
 // Svuotamento: un file per volta, con prudenza.
 var _allegDrenaggio=false;
 var _allegDaRifare=false;   // e arrivata una richiesta mentre eravamo occupati
+// Gli invii automatici non devono MAI aprire finestre: se manca il permesso
+// si accende l'invito in alto e si riprova al giro successivo.
 var allegInCorso=null;      // quale allegato sta salendo proprio adesso
 function allegCodaDrena(){
   // Occupato? La richiesta non si butta via: si rifa appena finito. Senza
@@ -6149,7 +6179,7 @@ function allegCodaDrena(){
   if(_allegDrenaggio){ _allegDaRifare=true; return Promise.resolve(); }
   if(!isOnline() || !currentUser) return Promise.resolve();
   _allegDrenaggio=true;
-  return allegCodaLeggi().then(function(righe){
+  return inSfondoDrive(allegCodaLeggi().then(function(righe){
     var utili=righe.filter(function(r){ return String(r.chiamata_id).indexOf('local_')!==0; });
     // Niente da inviare: si esce SENZA interrogare il database
     if(!utili.length) return false;
@@ -6183,7 +6213,7 @@ function allegCodaDrena(){
   }).catch(function(){
     _allegDrenaggio=false; allegInCorso=null; fineInvio();
     if(_allegDaRifare){ _allegDaRifare=false; allegCodaDrena(); }
-  });
+  }));
 }
 
 // Invio di UN allegato. Il file locale si cancella solo quando la riga negli
@@ -7532,7 +7562,7 @@ function modmCodaDrena(){
   if(_modmDrenaggio){ _modmDaRifare=true; return Promise.resolve(); }
   if(!isOnline() || !currentUser) return Promise.resolve();
   _modmDrenaggio=true;
-  return modmCodaLeggi().then(function(righe){
+  return inSfondoDrive(modmCodaLeggi().then(function(righe){
     // Coda vuota: si esce SENZA interrogare il database (niente traffico sprecato)
     if(!righe.length) return false;
     return ensureFreshToken().then(function(){
@@ -7561,7 +7591,7 @@ function modmCodaDrena(){
   }).catch(function(){
     _modmDrenaggio=false; fineInvio();
     if(_modmDaRifare){ _modmDaRifare=false; modmCodaDrena(); }
-  });
+  }));
 }
 
 // Invio di UN modulo dalla coda al server (e a Drive, se firmato)
