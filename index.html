@@ -558,6 +558,23 @@
       Solo le email presenti in questa lista possono accedere all'app. Cancellare un utente elimina anche <b>tutte le sue chiamate</b> in modo irreversibile.
     </div>
     <div id="adminUserList" style="margin-top:14px;max-height:50vh;overflow-y:auto;border:1px solid var(--bord);border-radius:12px;background:var(--surface2)"></div>
+
+    <div class="orfani-box">
+      <div class="orfani-tit">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3.5h6L21.5 15H15z"/><path d="M9 3.5L2.5 15l3 5.5L12 9z"/><path d="M6.5 20.5h11l3-5.5H9.5z"/></svg>
+        Documenti abbandonati su Google Drive
+      </div>
+      <div class="orfani-msg">
+        Cerca i file rimasti nella cartella <b>&laquo;allegati CA&raquo;</b> che non appartengono pi&ugrave; ad alcuna chiamata
+        (per esempio perch&eacute; la chiamata &egrave; stata eliminata prima che l&rsquo;app li ripulisse da sola).
+        Vengono controllati <b>solo i file creati da questa app</b>: il resto del tuo Drive non viene nemmeno letto.
+      </div>
+      <div class="orfani-azioni">
+        <button class="bcan" id="btnOrfaniCerca" type="button">Cerca documenti abbandonati</button>
+        <button class="bconf" id="btnOrfaniElimina" type="button" style="display:none;background:var(--er);color:#fff">Elimina definitivamente</button>
+      </div>
+      <div id="orfaniEsito" class="orfani-esito"></div>
+    </div>
     <div style="margin-top:14px">
       <button class="bconf2" id="btnAdminAddUser" type="button">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="vertical-align:-2px;margin-right:4px"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
