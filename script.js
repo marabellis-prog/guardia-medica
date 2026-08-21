@@ -7804,7 +7804,14 @@ function modmCodaCancella(callId){
   return modmDb().then(function(db){
     return new Promise(function(res){
       var t=db.transaction(MODM_STORE,'readwrite');
-      t.objectStore(MODM_STORE).delete(callId);
+      var st=t.objectStore(MODM_STORE);
+      // La chiamata puo essere stata salvata come numero (357) o come testo
+      // ("357", "local_..."): si prova in entrambe le forme, altrimenti la
+      // voce resterebbe in coda anche dopo averla tolta.
+      st.delete(callId);
+      var alt = (typeof callId==='number') ? String(callId)
+              : (/^\d+$/.test(String(callId)) ? parseInt(callId,10) : null);
+      if(alt!==null) st.delete(alt);
       t.oncomplete=function(){ res(true); };
       t.onerror=function(){ res(false); };
     });
