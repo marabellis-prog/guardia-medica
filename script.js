@@ -2097,6 +2097,15 @@ function renderListWithPending(records,total,pg,silenzioso){
     aggiornaElencoInPlace(merged);
   } else {
     drawRows(merged,null);
+    // Impronte anche al disegno completo: senza, il primo aggiornamento
+    // silenzioso troverebbe «tutto cambiato» e rifarebbe l'intero elenco.
+    var tbF=els.tbody||document.getElementById('tbody');
+    if(tbF) merged.forEach(function(r){
+      var chiave = r.localPending ? ('local_'+r.client_uuid) : String(r.id);
+      var el = r.localPending ? tbF.querySelector('tr[data-uuid="'+r.client_uuid+'"]')
+                              : tbF.querySelector('tr[data-row="'+r.id+'"]');
+      if(el) el.dataset.firma = (r.localPending?'L':'')+firmaRiga(r);
+    });
   }
   drawPgn(total,pg,CURRENT_PAGE_SIZE);
   var inf=total>0?total+' chiamat'+(total===1?'a':'e')+' in totale':'';
