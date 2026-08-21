@@ -1731,3 +1731,30 @@ html,body{overscroll-behavior-y:none}
 .orfani-riga:last-child{border-bottom:none}
 .orfani-nome{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .orfani-data{color:var(--txm);flex-shrink:0;font-size:.75rem}
+
+/* Elenco di ciò che deve ancora partire dal dispositivo */
+.coda-elenco{
+  margin-top:12px;max-height:46vh;overflow:auto;
+  border:1px solid var(--bord);border-radius:12px;background:var(--surface2);
+}
+.coda-vuota{padding:18px;text-align:center;color:var(--txm);font-size:.86rem}
+.coda-riga{
+  display:flex;align-items:center;gap:10px;padding:10px 12px;
+  border-bottom:1px solid var(--div,var(--bord));
+}
+.coda-riga:last-child{border-bottom:none}
+.coda-ic{flex-shrink:0}
+.coda-ic-chiamata{color:var(--pr,#2e7d5e)}
+.coda-ic-modifica{color:#b06a00}
+.coda-ic-modulo{color:#7b3fa0}
+.coda-ic-allegato{color:#1565c0}
+.coda-testo{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;font-size:.86rem}
+.coda-testo b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.coda-sotto{font-size:.76rem;color:var(--txm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.coda-del{
+  flex-shrink:0;width:30px;height:30px;border:none;border-radius:8px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  background:transparent;color:var(--er);opacity:.65;
+}
+.coda-del:hover{opacity:1;background:var(--erbg)}
+@media(hover:none){ .coda-del{opacity:1;width:36px;height:36px} }
