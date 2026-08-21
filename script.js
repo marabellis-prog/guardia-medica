@@ -655,7 +655,7 @@ function handleRemoteChanges(){
 }
 
 function refreshAndUpdateMark(){
-  loadRows(PAGE);
+  loadRows(PAGE, {silenzioso:true});
   // Aggiorna mark dopo che la query è andata a buon fine
   fetchLatestUpdate().then(function(ts){if(ts)lastKnownUpdate=ts;});
 }
@@ -1896,10 +1896,18 @@ function salva(){
 // ELENCO CHIAMATE
 // ═══════════════════════════════════════════════════════════════════
 
-function loadRows(pg){
-  PAGE=pg;dirtyMap={};
+function loadRows(pg, opz){
+  opz=opz||{};
+  PAGE=pg;
   var tb=els.tbody||document.getElementById('tbody');
-  tb.innerHTML='<tr><td><div class="sk" style="width:30px;height:30px;margin:0 auto;border-radius:6px"></div></td><td><div class="sk" style="width:24px;height:12px"></div></td><td><div class="sk" style="width:100px;height:12px"></div></td><td><div class="sk" style="width:85%;height:12px"></div></td><td><div class="sk" style="width:75%;height:12px"></div></td></tr>'.repeat(3);
+  // Silenzioso: si scarica senza togliere nulla dallo schermo. Le chiamate
+  // restano leggibili anche se la linea ci mette dieci secondi.
+  var giaPiena = tb.querySelector('tr[data-row], tr.local-pending');
+  var silenzioso = !!opz.silenzioso && !!giaPiena;
+  if(!silenzioso){
+    dirtyMap={};
+    tb.innerHTML='<tr><td><div class="sk" style="width:30px;height:30px;margin:0 auto;border-radius:6px"></div></td><td><div class="sk" style="width:24px;height:12px"></div></td><td><div class="sk" style="width:100px;height:12px"></div></td><td><div class="sk" style="width:85%;height:12px"></div></td><td><div class="sk" style="width:75%;height:12px"></div></td></tr>'.repeat(3);
+  }
 
   var offset=(pg-1)*CURRENT_PAGE_SIZE;
   var params='chiamate?select=*&deleted_at=is.null';
@@ -1937,7 +1945,7 @@ function loadRows(pg){
     var records=result.data.map(mapServerRow);
     // Cache dell'elenco (solo pagina 1 senza filtri) per apertura offline
     if(pg===1 && !showIncompleteOnly && !currentFilters) cacheServerRows(records, result.total);
-    renderListWithPending(records, result.total, pg);
+    renderListWithPending(records, result.total, pg, silenzioso);
     // Allegati: carica e inietta le righe "Allegati" (non blocca il render principale)
     var attIds=records.map(function(r){return r.id;});
     loadAttachmentsForCalls(attIds).then(injectAttachRows);
@@ -1948,6 +1956,8 @@ function loadRows(pg){
     enrichVisibleCallsCap(records);
   }).catch(function(e){
     hideLoader();
+    // In silenzio: se la lettura fallisce si tiene quel che c'e gia a schermo
+    if(silenzioso) return;
     renderOfflineFallback(pg, e);
   });
 }
@@ -1997,7 +2007,84 @@ function scartaLocaliGiaArrivate(inserts, records){
   return vive;
 }
 
-function renderListWithPending(records,total,pg){
+// Impronta dei dati che si vedono in una riga: se non cambia, la riga non
+// va toccata. Cosi un aggiornamento non fa sfarfallare tutto l'elenco.
+function firmaRiga(r){
+  return [r.id, r.client_uuid||'', r.tsFormatted||'', r.postazione||'',
+          r.descrizione||'', r.note||'', r.completato?1:0,
+          r.girata_a_user_id||'', r.girata_a_nome||'', r.girata_a_at||'',
+          r.girata_da_user_id||'', r.girata_da_nome||'', r.girata_da_at||''].join('\u0001');
+}
+
+// Una riga e «in uso» se ci stai scrivendo, se ha modifiche non ancora
+// salvate o se un salvataggio e gia in programma: non si tocca, punto.
+function rigaInUso(tr){
+  if(!tr) return false;
+  var id=tr.dataset.row;
+  if(id && dirtyMap[id]) return true;
+  if(id && autosaveTimers && autosaveTimers[id]) return true;
+  if(document.activeElement && tr.contains(document.activeElement)) return true;
+  if(tr.querySelector('.post-dropdown.open, .post-dropdown[style*="block"]')) return true;
+  return false;
+}
+
+// Sostituisce/aggiunge/toglie SOLO quel che e cambiato davvero.
+function aggiornaElencoInPlace(nuovi){
+  var tb=els.tbody||document.getElementById('tbody');
+  if(!tb) return false;
+  var esistenti={};
+  tb.querySelectorAll('tr[data-row], tr.local-pending').forEach(function(tr){
+    var k=tr.dataset.row || (tr.dataset.uuid ? 'local_'+tr.dataset.uuid : '');
+    if(k) esistenti[k]=tr;
+  });
+
+  var contenitore=document.createElement('tbody');
+  var precedente=null, cambiate=0;
+  nuovi.forEach(function(r){
+    var chiave = r.localPending ? ('local_'+r.client_uuid) : String(r.id);
+    var vecchia = esistenti[chiave];
+    var firma = r.localPending ? ('L'+firmaRiga(r)) : firmaRiga(r);
+    if(vecchia){
+      delete esistenti[chiave];
+      if(vecchia.dataset.firma!==firma && !rigaInUso(vecchia)){
+        contenitore.innerHTML = r.localPending ? renderPendingInsertRow(r) : drawRows([r], null, true);
+        var fresca=contenitore.firstElementChild;
+        if(fresca){
+          fresca.dataset.firma=firma;
+          vecchia.parentNode.replaceChild(fresca, vecchia);
+          vecchia=fresca; cambiate++;
+        }
+      }
+      // ordine: se e fuori posto la si rimette al suo posto
+      var attesa = precedente ? precedente.nextElementSibling : tb.firstElementChild;
+      if(attesa!==vecchia) tb.insertBefore(vecchia, attesa);
+      precedente=vecchia;
+    } else {
+      contenitore.innerHTML = r.localPending ? renderPendingInsertRow(r) : drawRows([r], null, true);
+      var nuova=contenitore.firstElementChild;
+      if(nuova){
+        nuova.dataset.firma=firma;
+        tb.insertBefore(nuova, precedente ? precedente.nextElementSibling : tb.firstElementChild);
+        precedente=nuova; cambiate++;
+      }
+    }
+  });
+  // Chiamate sparite (cestinate altrove): via, se non le stai usando
+  Object.keys(esistenti).forEach(function(k){
+    var tr=esistenti[k];
+    if(rigaInUso(tr)) return;
+    var acc=tr.nextElementSibling;
+    if(acc && acc.classList.contains('attach-row')) acc.remove();
+    tr.remove(); cambiate++;
+  });
+  // Barrette di caricamento e righe vuote residue
+  tb.querySelectorAll('tr').forEach(function(tr){
+    if(!tr.dataset.row && !tr.classList.contains('local-pending') && !tr.classList.contains('attach-row')) tr.remove();
+  });
+  return cambiate;
+}
+
+function renderListWithPending(records,total,pg,silenzioso){
   var merged=records;
   var pendingCount=0;
   if(pg===1 && !currentFilters && !showIncompleteOnly){
@@ -2005,7 +2092,12 @@ function renderListWithPending(records,total,pg){
     pendingCount=inserts.length;
     merged=inserts.concat(records);
   }
-  drawRows(merged,null);
+  if(silenzioso){
+    merged.forEach(function(r){ if(!r.localPending) ricordaBaseRiga(r); });
+    aggiornaElencoInPlace(merged);
+  } else {
+    drawRows(merged,null);
+  }
   drawPgn(total,pg,CURRENT_PAGE_SIZE);
   var inf=total>0?total+' chiamat'+(total===1?'a':'e')+' in totale':'';
   if(showIncompleteOnly&&total>0)inf='⏳ '+total+' in attesa';
@@ -2071,9 +2163,11 @@ function renderOfflineFallback(pg, e){
   (els.linfo||document.getElementById('linfo')).textContent=parts.join(' · ');
 }
 
-function drawRows(recs,highlightQuery){
+function drawRows(recs,highlightQuery,soloHtml){
   var tb=els.tbody||document.getElementById('tbody');
+  if(soloHtml) tb=null;
   if(!recs||!recs.length){
+    if(soloHtml) return '';
     tb.innerHTML='<tr><td colspan="5"><div class="emp"><svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg><h3>'+(currentFilters?'Nessun risultato':'Nessuna chiamata')+'</h3><p>'+(currentFilters?'Prova a modificare i criteri di ricerca.':'Premi «+» per registrare la prima chiamata.')+'</p></div></td></tr>';
     return;
   }
@@ -2083,7 +2177,7 @@ function drawRows(recs,highlightQuery){
     if(g.chiamata_origine_id) outgoingPendingMap[g.chiamata_origine_id] = g;
   });
 
-  tb.innerHTML=recs.map(function(r){
+  var html=recs.map(function(r){
     // Riga chiamata salvata solo in locale (in attesa di invio al server)
     if(r.localPending) return renderPendingInsertRow(r);
     ricordaBaseRiga(r);
@@ -2171,6 +2265,8 @@ function drawRows(recs,highlightQuery){
       +'<td data-field="note" contenteditable="true" spellcheck="false" style="white-space:pre-wrap">'+noteHtml+'</td>'
       +'</tr>';
   }).join('');
+  if(soloHtml) return html;
+  tb.innerHTML=html;
 
   // Listener attaccati una sola volta al boot via setupTableDelegation()
 }
@@ -3480,8 +3576,46 @@ function drawPgn(tot,pg,sz){
   w.innerHTML=h;
 }
 
-function apri(id){var el=document.getElementById(id);if(el)el.classList.add('open');}
-function chiudi(id){var el=document.getElementById(id);if(el)el.classList.remove('open');}
+// ── Con una finestra aperta la pagina dietro resta ferma ────────────
+// Si conserva il punto in cui eravamo e lo si ripristina alla chiusura.
+// Serve il blocco «duro» (pagina inchiodata) perche su iPhone e iPad il
+// semplice overflow non basta a fermare il tiro verso il basso, che
+// ricaricherebbe la pagina facendo perdere il lavoro in corso.
+var _puntoPagina=0, _paginaFerma=false;
+function aggiornaBloccoPagina(){
+  var qualcunoAperto = !!document.querySelector('.mov.open');
+  if(qualcunoAperto && !_paginaFerma){
+    _puntoPagina = window.scrollY || window.pageYOffset || 0;
+    document.body.style.position='fixed';
+    document.body.style.top=(-_puntoPagina)+'px';
+    document.body.style.left='0';
+    document.body.style.right='0';
+    document.body.style.width='100%';
+    document.body.classList.add('pagina-ferma');
+    _paginaFerma=true;
+  } else if(!qualcunoAperto && _paginaFerma){
+    document.body.classList.remove('pagina-ferma');
+    document.body.style.position='';
+    document.body.style.top='';
+    document.body.style.left='';
+    document.body.style.right='';
+    document.body.style.width='';
+    _paginaFerma=false;
+    window.scrollTo(0, _puntoPagina);
+  }
+}
+function apri(id){
+  var el=document.getElementById(id);
+  if(!el) return;
+  el.classList.add('open');
+  aggiornaBloccoPagina();
+}
+function chiudi(id){
+  var el=document.getElementById(id);
+  if(!el) return;
+  el.classList.remove('open');
+  aggiornaBloccoPagina();
+}
 
 
 // ═══════════════════════════════════════════════════════════════════
@@ -4444,10 +4578,11 @@ var capEnrichDone={};   // id già valutati in questa sessione (evita ripassaggi
 
 // Ridisegna l'elenco SOLO se non c'è nulla in sospeso: un redraw mentre l'utente
 // sta scrivendo azzera dirtyMap e stacca la riga → la modifica andrebbe persa.
+// Ricarica di servizio: silenziosa, e comunque mai mentre stai scrivendo
 function safeReloadRows(){
   if(Object.keys(dirtyMap).length>0)return;
   if(isUserBusy())return;
-  loadRows(PAGE);
+  loadRows(PAGE, {silenzioso:true});
 }
 
 // Riscrive la cella descrizione senza ricaricare tutto (niente sfarfallio/loop)
