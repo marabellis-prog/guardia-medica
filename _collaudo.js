@@ -89,8 +89,12 @@ function installa(){
     }
     var m = u.match(/files\/([^?]+)/);
     if(m && opt && opt.method === 'PATCH'){
-      if(S.drive[m[1]]) S.drive[m[1]].cestinato = true;
-      traccia('drive~ ' + m[1] + ' (cestinato)');
+      var corpo = {};
+      try{ corpo = JSON.parse(opt.body || '{}'); }catch(_){}
+      if(S.drive[m[1]] && typeof corpo.trashed === 'boolean'){
+        S.drive[m[1]].cestinato = corpo.trashed;
+        traccia('drive~ ' + m[1] + (corpo.trashed ? ' (cestinato)' : ' (ripristinato)'));
+      }
       return Promise.resolve({ ok:true, status:200 });
     }
     return Promise.resolve({ ok:true, status:200, json:function(){ return Promise.resolve({}); } });
@@ -136,20 +140,20 @@ function installa(){
       }
       if(met === 'DELETE'){
         if(path.indexOf('deleted_at=not.is.null') !== -1){
-          var via = S.db.chiamate.filter(function(c){ return c.deleted_at; }).map(function(c){ return c.id; });
+          var via = S.db.chiamate.filter(function(c){ return c.deleted_at; }).map(function(c){ return String(c.id); });
           S.db.chiamate = S.db.chiamate.filter(function(c){ return !c.deleted_at; });
-          // a cascata, come nel database vero
-          S.db.allegati = S.db.allegati.filter(function(a){ return via.indexOf(a.chiamata_id) === -1; });
-          S.db.moduli = S.db.moduli.filter(function(m){ return via.indexOf(m.chiamata_id) === -1; });
+          // a cascata, come nel database vero (confronto per testo: il client
+          // manda gli id come stringhe, PostgREST li converte da solo)
+          S.db.allegati = S.db.allegati.filter(function(a){ return via.indexOf(String(a.chiamata_id)) === -1; });
+          S.db.moduli = S.db.moduli.filter(function(m){ return via.indexOf(String(m.chiamata_id)) === -1; });
           traccia('db- cestino svuotato (' + via.length + ')');
           return risposta([], 204);
         }
         var md = path.match(/id=eq\.(\d+)/);
         if(md){
-          var idv = parseInt(md[1], 10);
-          S.db.chiamate = S.db.chiamate.filter(function(c){ return c.id !== idv; });
-          S.db.allegati = S.db.allegati.filter(function(a){ return a.chiamata_id !== idv; });
-          S.db.moduli = S.db.moduli.filter(function(m){ return m.chiamata_id !== idv; });
+          S.db.chiamate = S.db.chiamate.filter(function(c){ return String(c.id) !== md[1]; });
+          S.db.allegati = S.db.allegati.filter(function(a){ return String(a.chiamata_id) !== md[1]; });
+          S.db.moduli = S.db.moduli.filter(function(m){ return String(m.chiamata_id) !== md[1]; });
         }
         return risposta([], 204);
       }
@@ -191,6 +195,11 @@ function installa(){
         var ids = mi2[1].split(',');
         return risposta(S.db.allegati.filter(function(x){ return ids.indexOf(String(x.chiamata_id)) !== -1; }));
       }
+      var me1 = path.match(/chiamata_id=eq\.([^&]+)/);
+      if(me1){
+        var ce = decodeURIComponent(me1[1]);
+        return risposta(S.db.allegati.filter(function(x){ return String(x.chiamata_id) === ce; }));
+      }
       return risposta(S.db.allegati.slice());
     }
 
@@ -226,6 +235,11 @@ function installa(){
       if(mi3){
         var ids3 = mi3[1].split(',');
         return risposta(S.db.moduli.filter(function(x){ return ids3.indexOf(String(x.chiamata_id)) !== -1; }));
+      }
+      var me2 = path.match(/chiamata_id=eq\.([^&]+)/);
+      if(me2){
+        var ce2 = decodeURIComponent(me2[1]);
+        return risposta(S.db.moduli.filter(function(x){ return String(x.chiamata_id) === ce2; }));
       }
       return risposta(S.db.moduli.slice());
     }
