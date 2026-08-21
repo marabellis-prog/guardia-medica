@@ -248,6 +248,7 @@ function avvioOffline(){
   syncRenderBadge();
   mostraAvvisoOffline();
   modmCaricaCodaInMappa();
+  allegCaricaCodaInMappa();
   return true;
 }
 function mostraAvvisoOffline(){
@@ -273,6 +274,7 @@ function riaggancioRete(){
     aggiornaIndicatoreRete();
     syncProcess();
     modmCodaDrena();
+    allegCodaDrena();
     safeReloadRows();
     driveWarmup();
     scaldaLibreriePdf();     // chi era partito offline non le aveva ancora
@@ -388,6 +390,7 @@ async function setupAuth(){
   setTimeout(scaldaLibreriePdf, 2500);
   // Moduli M rimasti in tasca dall'ultima uscita: si recuperano e si spediscono
   modmCaricaCodaInMappa().then(function(){ setTimeout(modmCodaDrena, 3000); });
+  allegCaricaCodaInMappa().then(function(){ setTimeout(allegCodaDrena, 4000); });
   // Il profilo resta a bordo: e la chiave per aprire l'app anche senza rete
   salvaProfiloOffline(currentUser);
 }
@@ -2159,6 +2162,8 @@ function renderOfflineFallback(pg, e){
   }
   drawRows(merged,null);
   drawPgn(0,1,CURRENT_PAGE_SIZE);
+  // Anche senza linea le icone ci sono: Modulo M e allegati si compilano lo stesso
+  try{ modmApplicaLocali(); injectModmUi(); injectAttachRows(); }catch(_){}
   // Marca le righe con modifica in coda
   var updIds=updates.map(function(u){return String(u.id);});
   updIds.forEach(function(id){
@@ -2299,10 +2304,11 @@ function renderPendingInsertRow(r){
     +'<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>'
     +'Solo in locale — in attesa di invio</span>';
   var clock='<div class="iho-localwait" title="In attesa di invio al server"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></div>';
+  var attachBtnLoc='<div class="iho-attach" data-row="local_'+esc(r.client_uuid)+'" title="Allega file (foto di documenti, referti\u2026)">'+svgAttach()+'</div>';
   var delBtn='<div class="idel-local" data-uuid="'+esc(r.client_uuid)+'" title="Elimina questa chiamata locale (non ancora inviata)">'
     +'<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></div>';
   return '<tr class="local-pending" data-uuid="'+esc(r.client_uuid)+'" data-original-ts="'+esc(tsf)+'">'
-    +'<td class="tds"><div class="sc">'+clock+delBtn+'</div></td>'
+    +'<td class="tds"><div class="sc">'+clock+attachBtnLoc+delBtn+'</div></td>'
     +'<td class="tid">—</td>'
     +'<td class="tdt"><div class="dt-wrap">'
       +'<span class="dt-date" contenteditable="true" data-field="dt-date" spellcheck="false">'+esc(ds)+'</span>'
@@ -2884,7 +2890,7 @@ function setupTableDelegation(){
     var attBtn=t.closest('.iho-attach');
     if(attBtn){
       e.stopPropagation();
-      openAttachModal(parseInt(attBtn.dataset.row));
+      openAttachModal(idModulo(attBtn));
       return;
     }
     var attName=t.closest('.attach-name');
@@ -5921,6 +5927,126 @@ function driveGetBlob(fileId){
     .then(function(r){ if(!r.ok) throw new Error('download_'+r.status); return r.blob(); });
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// CODA LOCALE DEGLI ALLEGATI — le foto dei documenti si allegano subito,
+// anche in campagna. Restano al sicuro sul dispositivo (IndexedDB, che
+// regge i file interi) e salgono su Drive quando la linea torna. Il file
+// temporaneo si cancella SOLO dopo la conferma che tutto e arrivato.
+// ═══════════════════════════════════════════════════════════════════
+var ALLEG_DB='gm_allegati', ALLEG_STORE='coda';
+var _allegDb=null;
+var allegatiLocali={};      // chiamata_id -> [voci in attesa]
+
+function allegDb(){
+  if(_allegDb) return Promise.resolve(_allegDb);
+  return new Promise(function(res,rej){
+    if(!window.indexedDB){ rej(new Error('no_idb')); return; }
+    var r=indexedDB.open(ALLEG_DB,1);
+    r.onupgradeneeded=function(e){
+      var db=e.target.result;
+      if(!db.objectStoreNames.contains(ALLEG_STORE)) db.createObjectStore(ALLEG_STORE,{keyPath:'id'});
+    };
+    r.onsuccess=function(){ _allegDb=r.result; res(_allegDb); };
+    r.onerror=function(){ rej(r.error||new Error('idb')); };
+  });
+}
+function allegCodaScrivi(rec){
+  return allegDb().then(function(db){
+    return new Promise(function(res,rej){
+      var t=db.transaction(ALLEG_STORE,'readwrite');
+      t.objectStore(ALLEG_STORE).put(rec);
+      t.oncomplete=function(){ res(true); };
+      t.onerror=function(){ rej(t.error); };
+    });
+  }).catch(function(){ return false; });
+}
+function allegCodaCancella(id){
+  return allegDb().then(function(db){
+    return new Promise(function(res){
+      var t=db.transaction(ALLEG_STORE,'readwrite');
+      t.objectStore(ALLEG_STORE).delete(id);
+      t.oncomplete=function(){ res(true); };
+      t.onerror=function(){ res(false); };
+    });
+  }).catch(function(){ return false; });
+}
+function allegCodaLeggi(){
+  return allegDb().then(function(db){
+    return new Promise(function(res){
+      var t=db.transaction(ALLEG_STORE,'readonly');
+      var q=t.objectStore(ALLEG_STORE).getAll();
+      q.onsuccess=function(){ res(q.result||[]); };
+      q.onerror=function(){ res([]); };
+    });
+  }).catch(function(){ return []; });
+}
+function allegCaricaCodaInMappa(){
+  return allegCodaLeggi().then(function(righe){
+    allegatiLocali={};
+    righe.forEach(function(r){
+      var k=String(r.chiamata_id);
+      (allegatiLocali[k]=allegatiLocali[k]||[]).push(r);
+    });
+    return allegatiLocali;
+  });
+}
+
+// Svuotamento: un file per volta, con prudenza.
+var _allegDrenaggio=false;
+function allegCodaDrena(){
+  if(_allegDrenaggio || !isOnline() || !currentUser) return Promise.resolve();
+  _allegDrenaggio=true;
+  return allegCodaLeggi().then(function(righe){
+    var utili=righe.filter(function(r){ return String(r.chiamata_id).indexOf('local_')!==0; });
+    if(!utili.length) return null;
+    return ensureFreshToken().then(function(){
+      var catena=Promise.resolve();
+      utili.forEach(function(r){ catena=catena.then(function(){ return allegInvia(r); }); });
+      return catena;
+    });
+  }).then(function(){
+    _allegDrenaggio=false;
+    return allegCaricaCodaInMappa().then(function(){
+      if(typeof getVisibleCallIds==='function'){
+        return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
+      }
+    });
+  }).catch(function(){ _allegDrenaggio=false; });
+}
+
+// Invio di UN allegato. Il file locale si cancella solo quando la riga negli
+// allegati esiste davvero: se qualcosa va storto, resta e si riprova.
+function allegInvia(rec){
+  var caricamento;
+  if(rec.drive_file_id){
+    // gia salito su Drive in un tentativo precedente: non si ricarica
+    caricamento=Promise.resolve({id:rec.drive_file_id, name:rec.nome});
+  } else {
+    var file=new File([rec.blob], rec.nome, {type:rec.tipo||'application/octet-stream'});
+    caricamento=driveUpload(file).then(function(f){
+      // si annota subito, cosi un errore successivo non fa un doppione
+      rec.drive_file_id=f.id;
+      return allegCodaScrivi(rec).then(function(){ return f; });
+    });
+  }
+  return caricamento.then(function(f){
+    return sbFetch('allegati',{method:'POST',prefer:'return=minimal',body:{
+      chiamata_id: rec.chiamata_id, drive_file_id: f.id, file_name: rec.nome,
+      mime_type: rec.tipo||null, size_bytes: rec.dimensione||null,
+      user_id: currentUser?currentUser.id:null
+    }}).then(function(res){
+      if(!res.ok) throw new Error('db_'+res.status);
+      // Solo ORA il file temporaneo puo sparire
+      return allegCodaCancella(rec.id).then(function(){ return true; });
+    });
+  }).catch(function(){ return false; });
+}
+
+if(typeof window!=='undefined'){
+  window.addEventListener('online', function(){ setTimeout(allegCodaDrena, 1500); });
+  setInterval(function(){ allegCodaDrena(); }, 60000);
+}
+
 // ── Metadati allegati (Supabase) ─────────────────────────────────────
 function loadAttachmentsForCalls(callIds){
   var ids=(callIds||[]).filter(function(x){return x && String(x).indexOf('local_')!==0;});
@@ -5948,9 +6074,18 @@ function injectAttachRows(){
   for(var i=0;i<old.length;i++){ old[i].parentNode.removeChild(old[i]); }
   var prev=tb.querySelectorAll('tr.has-attachments');
   for(var j=0;j<prev.length;j++){ prev[j].classList.remove('has-attachments'); }
-  Object.keys(attachmentsByCall).forEach(function(cid){
-    var list=attachmentsByCall[cid]; if(!list||!list.length)return;
-    var row=tb.querySelector('tr[data-row="'+cid+'"]');
+  // Uniti: quelli gia sul server e quelli ancora in attesa sul dispositivo
+  var tutti={};
+  Object.keys(attachmentsByCall).forEach(function(k){ tutti[k]=(attachmentsByCall[k]||[]).slice(); });
+  Object.keys(allegatiLocali).forEach(function(k){
+    (allegatiLocali[k]||[]).forEach(function(r){
+      (tutti[k]=tutti[k]||[]).push({id:r.id, drive_file_id:'', file_name:r.nome, inAttesa:true});
+    });
+  });
+  Object.keys(tutti).forEach(function(cid){
+    var list=tutti[cid]; if(!list||!list.length)return;
+    var row=tb.querySelector('tr[data-row="'+cid+'"]')
+         || (String(cid).indexOf('local_')===0 ? tb.querySelector('tr[data-uuid="'+String(cid).slice(6)+'"]') : null);
     if(!row)return;
     var ar=document.createElement('tr');
     // Stesso sfondo della chiamata (pending giallo / done bianco): fa parte della stessa chiamata
@@ -5966,6 +6101,14 @@ function injectAttachRows(){
   });
 }
 function attachItemHtml(a){
+  if(a.inAttesa){
+    // Ancora sul dispositivo: si mostra ma non si puo aprire ne cancellare
+    return '<span class="attach-item attach-attesa" data-locale="'+esc(a.id)+'" title="Al sicuro sul dispositivo: salira su Drive appena torna la linea">'
+      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+      +'<span class="attach-fname">'+esc(a.file_name)+'</span>'
+      +'<span class="attach-attesa-tag">da inviare</span>'
+    +'</span>';
+  }
   return '<span class="attach-item" data-id="'+a.id+'" data-drive="'+esc(a.drive_file_id)+'" data-name="'+esc(a.file_name)+'">'
     +'<span class="attach-name" title="Scarica '+esc(a.file_name)+'">'
       +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>'
@@ -5990,8 +6133,11 @@ function setModalBusy(modalId, attivo, testo){
 
 // ── Modal upload ─────────────────────────────────────────────────────
 function openAttachModal(callId){
-  if(!isOnline()){ fb(false,'Serve connessione','Gli allegati richiedono internet. Riprova quando torni online.'); return; }
+  // Si allega anche senza linea: i file restano al sicuro sul dispositivo
+  // e salgono su Drive appena la connessione torna.
   if(!driveConfigured()){ fb(false,'Drive non configurato','Manca il Client ID di Google. Contatta l\'amministratore.'); return; }
+  var avviso=document.getElementById('attachAvvisoOffline');
+  if(avviso) avviso.style.display = isOnline() ? 'none' : '';
   attachModalCallId=callId;
   var inp=document.getElementById('attachFileInput'); if(inp)inp.value='';
   var sel=document.getElementById('attachSelectedList'); if(sel)sel.innerHTML='';
@@ -6018,6 +6164,48 @@ function fmtBytes(n){
   return (n/1048576).toFixed(1)+' MB';
 }
 function doAttachUpload(){
+  var inp=document.getElementById('attachFileInput');
+  var files=inp&&inp.files?Array.prototype.slice.call(inp.files):[];
+  if(!files.length){ return; }
+  var callId=attachModalCallId;
+
+  // I file vanno SEMPRE prima in cassaforte sul dispositivo: da quel momento
+  // non si perdono, ne se cade la linea ne se si chiude l'app.
+  setModalBusy('mattach', true, files.length===1?'Metto al sicuro il file\u2026':('Metto al sicuro '+files.length+' file\u2026'));
+  var messi=0;
+  var salvataggio=Promise.resolve();
+  files.forEach(function(file){
+    salvataggio=salvataggio.then(function(){
+      return allegCodaScrivi({
+        id:newClientUuid(), chiamata_id:callId, nome:file.name,
+        tipo:file.type||'application/octet-stream', dimensione:file.size,
+        blob:file, ts:Date.now()
+      }).then(function(ok){ if(ok) messi++; });
+    });
+  });
+  return salvataggio.then(function(){
+    if(!messi){
+      setModalBusy('mattach', false);
+      fb(false,'Non riuscito','La memoria del dispositivo non e disponibile: i file non sono stati salvati.');
+      return;
+    }
+    return allegCaricaCodaInMappa().then(function(){
+      if(inp) inp.value='';
+      setModalBusy('mattach', false);
+      chiudi('mattach');
+      injectAttachRows();
+      if(!isOnline()){
+        fb(true,'Al sicuro sul dispositivo', messi+(messi===1?' file allegato':' file allegati')+': saliranno su Drive da soli appena torna la linea.');
+        return;
+      }
+      fb(true,'Allegato', messi+(messi===1?' file allegato':' file allegati')+'. Caricamento su Drive in corso\u2026');
+      return allegCodaDrena();
+    });
+  });
+}
+
+// Vecchio percorso diretto, non piu usato: resta per riferimento storico
+function doAttachUploadDiretto(){
   var inp=document.getElementById('attachFileInput');
   var files=inp&&inp.files?Array.prototype.slice.call(inp.files):[];
   if(!files.length){ return; }
@@ -7262,6 +7450,17 @@ function modmRimappaLocale(clientUuid, idVero){
       return modmCodaCancella(chiaveVecchia);
     }).then(function(){ modmApplicaLocali(); return true; });
   };
+  // Gli allegati in attesa seguono la chiamata al suo numero vero
+  allegCodaLeggi().then(function(righe){
+    var miei=righe.filter(function(x){ return String(x.chiamata_id)===chiaveVecchia; });
+    if(!miei.length) return null;
+    var catena=Promise.resolve();
+    miei.forEach(function(r){
+      catena=catena.then(function(){ r.chiamata_id=idVero; return allegCodaScrivi(r); });
+    });
+    return catena.then(allegCaricaCodaInMappa).then(function(){ allegCodaDrena(); });
+  }).catch(function(){});
+
   if(vecchio) return Promise.resolve(applica(vecchio));
   // potrebbe essere solo su disco (app riaperta): lo cerco li
   return modmCodaLeggi().then(function(righe){
