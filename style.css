@@ -1713,3 +1713,21 @@ html,body{overscroll-behavior-y:none}
   background:rgba(21,101,192,.14);color:#1565c0;border-style:solid;border-color:rgba(21,101,192,.4);
 }
 [data-theme="dark"] .attach-item.attach-sale{background:rgba(100,181,246,.16);color:#64b5f6;border-color:rgba(100,181,246,.42)}
+
+/* Pulizia dei documenti abbandonati su Drive (pannello amministrazione) */
+.orfani-box{
+  margin-top:16px;padding:14px;border-radius:12px;
+  border:1px solid var(--bord);background:var(--surface2);
+}
+.orfani-tit{display:flex;align-items:center;gap:.5rem;font-family:var(--fd);font-size:1rem;color:var(--tx);margin-bottom:.4rem}
+.orfani-msg{font-size:.84rem;line-height:1.5;color:var(--txm)}
+.orfani-azioni{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.orfani-esito{margin-top:10px;font-size:.84rem;line-height:1.5}
+.orfani-elenco{
+  margin-top:8px;max-height:200px;overflow:auto;border:1px solid var(--bord);
+  border-radius:10px;background:var(--surface);padding:8px;
+}
+.orfani-riga{display:flex;align-items:center;gap:8px;padding:4px 2px;font-size:.8rem;border-bottom:1px solid var(--div,var(--bord))}
+.orfani-riga:last-child{border-bottom:none}
+.orfani-nome{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.orfani-data{color:var(--txm);flex-shrink:0;font-size:.75rem}
