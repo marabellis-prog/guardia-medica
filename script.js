@@ -242,7 +242,8 @@ var uscitaVoluta=false;      // vero solo quando premi tu «Esci»
 function cosePendenti(){
   try{
     if(syncLoadQueue().length) return true;
-    if(Object.keys(moduliMLocali||{}).length) return true;
+    var mm=Object.keys(moduliMLocali||{});
+    for(var i=0;i<mm.length;i++){ if(!(moduliMLocali[mm[i]]||{}).soloDocumento) return true; }
     if(Object.keys(allegatiLocali||{}).length) return true;
     if(localStorage.getItem(DRAFT_KEY)) return true;
   }catch(_){}
@@ -2763,7 +2764,14 @@ function syncRenderBadge(){
   var q=syncLoadQueue();
   var inserts=q.filter(function(e){return e.type==='insert';}).length;
   var updates=q.length-inserts;
-  var moduli=Object.keys(moduliMLocali||{}).length;
+  // I moduli gia sul server, a cui manca solo il documento, NON si contano:
+  // sarebbe un numero che allarma senza motivo.
+  var moduli=0;
+  try{
+    Object.keys(moduliMLocali||{}).forEach(function(k){
+      if(!(moduliMLocali[k]||{}).soloDocumento) moduli++;
+    });
+  }catch(_){}
   var alleg=0;
   try{ Object.keys(allegatiLocali||{}).forEach(function(k){ alleg+=(allegatiLocali[k]||[]).length; }); }catch(_){}
   var totale=inserts+updates+moduli+alleg;
@@ -2829,8 +2837,10 @@ function disegnaElencoCoda(){
     });
     moduli.forEach(function(m){
       var dove=String(m.chiamata_id).indexOf('local_')===0 ? 'chiamata non ancora registrata' : ('chiamata '+m.chiamata_id);
-      var stato=m.firmato ? 'firmato' : 'bozza';
-      righe.push(voceCoda('modulo','Modulo M ('+stato+')', dove, 'modm:'+m.chiamata_id));
+      var titolo = m.soloDocumento
+        ? 'Modulo M \u2014 gi\u00e0 salvato, manca il documento'
+        : ('Modulo M ('+(m.firmato?'firmato':'bozza')+')');
+      righe.push(voceCoda('modulo', titolo, dove, 'modm:'+m.chiamata_id));
     });
     alleg.forEach(function(a){
       var dove=String(a.chiamata_id).indexOf('local_')===0 ? 'chiamata non ancora registrata' : ('chiamata '+a.chiamata_id);
@@ -7294,6 +7304,14 @@ function modmPrecompila(callId){
 }
 
 function modmApri(callId){
+  // Se il foglio era stato prestato alla fotografia, lo si riprende subito:
+  // senza questo la finestra si aprirebbe grigia e vuota.
+  if(fotografiaInCorso) fotografiaAnnullata=true;
+  try{ modmModalitaStampa(false); }catch(_){}
+  var f0=document.getElementById('modmFoglio');
+  var palco=document.getElementById('modmPalco');
+  if(f0 && palco && f0.parentNode!==palco){ try{ palco.appendChild(f0); }catch(_){} }
+
   modmCallId=callId;
   var salvato = moduliMByCall[String(callId)];
   modmSegnoAttivo=null;
@@ -7718,18 +7736,28 @@ function modmModalitaStampa(attiva){
 // rispondere mai. Senza un limite lo spinner girava all'infinito e il Modulo M
 // non entrava nemmeno in coda: restava nel nulla.
 var PDF_ATTESA_MAX=30000;
+// Il foglio e uno solo: mentre viene fotografato non puo essere anche
+// dentro la finestra. Questo dice se e impegnato e permette di annullare.
+var fotografiaInCorso=false, fotografiaAnnullata=false;
 function modmGeneraPdf(){
+  fotografiaInCorso=true; fotografiaAnnullata=false;
   return new Promise(function(risolvi, rifiuta){
     var chiuso=false;
     var scadenza=setTimeout(function(){
       if(chiuso) return; chiuso=true;
+      fotografiaInCorso=false;
       try{ modmModalitaStampa(false); }catch(_){}
       rifiuta(new Error('pdf_lento'));
     }, PDF_ATTESA_MAX);
     modmGeneraPdfInterno().then(function(b){
-      if(chiuso) return; chiuso=true; clearTimeout(scadenza); risolvi(b);
+      if(chiuso) return; chiuso=true; clearTimeout(scadenza);
+      fotografiaInCorso=false;
+      if(fotografiaAnnullata){ rifiuta(new Error('pdf_annullato')); return; }
+      risolvi(b);
     }).catch(function(e){
-      if(chiuso) return; chiuso=true; clearTimeout(scadenza); rifiuta(e);
+      if(chiuso) return; chiuso=true; clearTimeout(scadenza);
+      fotografiaInCorso=false;
+      rifiuta(e);
     });
   });
 }
@@ -7853,19 +7881,54 @@ function modmCaricaCodaInMappa(){
 function modmApplicaLocali(){
   Object.keys(moduliMLocali).forEach(function(k){
     var r=moduliMLocali[k];
+    // Se manca solo il documento, il modulo e gia sul server: non va
+    // segnalato come «da inviare», sarebbe un falso allarme.
+    if(r.soloDocumento && moduliMByCall[k]) return;
     moduliMByCall[k]={ chiamata_id:r.chiamata_id, dati:r.dati, firmato:!!r.firmato,
-                       drive_file_id:null, allegato_id:null, file_name:r.nome||null, inCoda:true };
+                       drive_file_id:null, allegato_id:null, file_name:r.nome||null,
+                       inCoda:!r.soloDocumento };
   });
 }
 
 // ── Svuotamento della coda: appena c'e linea ──
+// Un modulo o un allegato agganciati a una chiamata «non ancora registrata»
+// restano fermi finche non si scopre il numero vero. Questo lo chiede al
+// server e rifa il collegamento: senza, dopo un riavvio dell'app resterebbero
+// bloccati per sempre.
+function risolviEtichetteProvvisorie(){
+  return Promise.all([modmCodaLeggi(), allegCodaLeggi()]).then(function(r){
+    var uuid={};
+    (r[0]||[]).forEach(function(x){ var k=String(x.chiamata_id); if(k.indexOf('local_')===0) uuid[k.slice(6)]=1; });
+    (r[1]||[]).forEach(function(x){ var k=String(x.chiamata_id); if(k.indexOf('local_')===0) uuid[k.slice(6)]=1; });
+    var elenco=Object.keys(uuid);
+    if(!elenco.length) return false;
+    var catena=Promise.resolve(), risolti=0;
+    elenco.forEach(function(u){
+      catena=catena.then(function(){
+        // Se la chiamata e ancora in coda, il collegamento lo fara l'invio
+        var inCoda=syncLoadQueue().some(function(e){ return e.type==='insert' && e.client_uuid===u; });
+        if(inCoda) return null;
+        return sbFetch('chiamate?client_uuid=eq.'+encodeURIComponent(u)+'&select=id')
+          .then(function(res){ return res.json(); })
+          .then(function(righe){
+            var id=(Array.isArray(righe)&&righe[0])?righe[0].id:null;
+            if(id==null) return null;
+            risolti++;
+            return modmRimappaLocale(u, id);
+          }).catch(function(){ return null; });
+      });
+    });
+    return catena.then(function(){ return risolti>0; });
+  }).catch(function(){ return false; });
+}
+
 var _modmDrenaggio=false;
 var _modmDaRifare=false;
 function modmCodaDrena(){
   if(_modmDrenaggio){ _modmDaRifare=true; return Promise.resolve(); }
   if(!isOnline() || !currentUser) return Promise.resolve();
   _modmDrenaggio=true;
-  return inSfondoDrive(modmCodaLeggi().then(function(righe){
+  return inSfondoDrive(risolviEtichetteProvvisorie().then(modmCodaLeggi).then(function(righe){
     // Coda vuota: si esce SENZA interrogare il database (niente traffico sprecato)
     if(!righe.length) return false;
     return ensureFreshToken().then(function(){
@@ -7907,8 +7970,11 @@ function modmInvia(rec){
   var passo;
   if(rec.firmato){
     var pdf=rec.pdf;
+    // Se il documento non si riesce a produrre, NON si rinuncia all'invio:
+    // dati e firma vanno sul server lo stesso (sono loro che contano) e il
+    // documento verra aggiunto a un tentativo successivo.
     passo=(pdf ? Promise.resolve(pdf) : modmRigeneraPdf(rec)).then(function(blob){
-      if(!blob) throw new Error('pdf_mancante');
+      if(!blob) return null;
       // Il nome si ricalcola ora: se il modulo era stato compilato prima che
       // la chiamata avesse un numero, porterebbe ancora l'etichetta provvisoria.
       var nome='Modulo M - chiamata '+callId+'.pdf';
@@ -7947,6 +8013,12 @@ function modmInvia(rec){
       : sbFetch('moduli_m',{method:'POST',prefer:'return=minimal',body:corpo});
     return req.then(function(res){
       if(!res.ok && res.status!==409) throw new Error('db_'+res.status);
+      if(rec.firmato && !x){
+        // Salvato senza documento: si tiene in coda solo il compito di
+        // produrlo, non tutto il modulo (che ormai e al sicuro sul server).
+        rec.soloDocumento=true;
+        return modmCodaScrivi(rec).then(function(){ return true; });
+      }
       return modmCodaCancella(callId).then(function(){ return true; });
     });
   }).catch(function(){ return false; });   // resta in coda, si riprova
