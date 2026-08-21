@@ -247,6 +247,7 @@ function avvioOffline(){
   restoreDraft();
   syncRenderBadge();
   mostraAvvisoOffline();
+  modmCaricaCodaInMappa();
   return true;
 }
 function mostraAvvisoOffline(){
@@ -271,6 +272,7 @@ function riaggancioRete(){
     avvioSenzaRete=false;
     aggiornaIndicatoreRete();
     syncProcess();
+    modmCodaDrena();
     safeReloadRows();
     driveWarmup();
   });
@@ -381,6 +383,10 @@ async function setupAuth(){
   setTimeout(capBackfillArchive, 4000);
   // Autorizzazione Drive: controllo silenzioso in parallelo (invito solo se serve)
   setTimeout(function(){ driveWarmup(true); }, 900);
+  // Librerie del PDF in cache: il Modulo M si firma anche senza linea
+  setTimeout(scaldaLibreriePdf, 2500);
+  // Moduli M rimasti in tasca dall'ultima uscita: si recuperano e si spediscono
+  modmCaricaCodaInMappa().then(function(){ setTimeout(modmCodaDrena, 3000); });
   // Il profilo resta a bordo: e la chiave per aprire l'app anche senza rete
   salvaProfiloOffline(currentUser);
 }
@@ -1943,7 +1949,7 @@ function loadRows(pg){
     loadAttachmentsForCalls(attIds).then(injectAttachRows);
     // Moduli M gia compilati: innesto mirato, senza ridisegnare (un redraw
     // mentre si scrive farebbe perdere le modifiche non ancora salvate)
-    caricaModuliM(attIds).then(injectModmUi);
+    caricaModuliM(attIds).then(function(){ modmApplicaLocali(); injectModmUi(); });
     // CAP: completa quelli mancanti nelle chiamate visibili
     enrichVisibleCallsCap(records);
   }).catch(function(e){
@@ -3752,14 +3758,61 @@ function downloadFile(content,filename,mime){
   setTimeout(function(){URL.revokeObjectURL(url);},1000);
 }
 
-function loadScriptOnce(src){
-  return new Promise(function(resolve,reject){
-    if(document.querySelector('script[src="'+src+'"]')){resolve();return;}
+// Caricamento di una libreria esterna, una volta sola.
+// Con un limite di tempo: senza, una rete che si impunta lasciava lo spinner
+// a girare per sempre (ne onload ne onerror arrivano mai). Se e indicato il
+// nome del globale, si controlla che sia davvero comparso.
+var _scriptPromesse={};
+var SCRIPT_ATTESA_MAX=20000;
+function scriptGlobalePronto(nome){
+  if(!nome) return true;
+  var v=window;
+  var parti=nome.split('.');
+  for(var i=0;i<parti.length;i++){
+    if(v==null) return false;
+    v=v[parti[i]];
+  }
+  return v!==undefined && v!==null;
+}
+function loadScriptOnce(src, globale){
+  if(scriptGlobalePronto(globale) && document.querySelector('script[src="'+src+'"]')) return Promise.resolve();
+  if(_scriptPromesse[src]) return _scriptPromesse[src];
+  var p=new Promise(function(resolve,reject){
+    var vecchio=document.querySelector('script[src="'+src+'"]');
+    if(vecchio){ try{ vecchio.parentNode.removeChild(vecchio); }catch(_){} }
     var s=document.createElement('script');
-    s.src=src;s.async=true;
-    s.onload=function(){resolve();};
-    s.onerror=function(){reject(new Error('Load failed: '+src));};
+    s.src=src; s.async=true;
+    var chiuso=false;
+    var scadenza=setTimeout(function(){
+      if(chiuso) return; chiuso=true;
+      try{ s.parentNode.removeChild(s); }catch(_){}
+      reject(new Error('script_lento'));
+    }, SCRIPT_ATTESA_MAX);
+    s.onload=function(){
+      if(chiuso) return; chiuso=true; clearTimeout(scadenza);
+      if(scriptGlobalePronto(globale)) resolve();
+      else reject(new Error('script_incompleto'));
+    };
+    s.onerror=function(){
+      if(chiuso) return; chiuso=true; clearTimeout(scadenza);
+      try{ s.parentNode.removeChild(s); }catch(_){}
+      reject(new Error('script_non_raggiungibile'));
+    };
     document.head.appendChild(s);
+  });
+  _scriptPromesse[src]=p;
+  p.catch(function(){ delete _scriptPromesse[src]; });   // fallita: si potra riprovare
+  return p;
+}
+
+// Le librerie del PDF servono anche in campagna: le porto in cache appena
+// l'app e in piedi, cosi il giorno che non c'e linea sono gia a bordo.
+var PDF_LIB_H2C='https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
+var PDF_LIB_JSPDF='https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js';
+function scaldaLibreriePdf(){
+  if(!isOnline()) return;
+  [PDF_LIB_H2C, PDF_LIB_JSPDF].forEach(function(u){
+    try{ fetch(u,{cache:'force-cache'}).catch(function(){}); }catch(_){}
   });
 }
 
@@ -6578,8 +6631,8 @@ function modmModalitaStampa(attiva){
 // ── Salvataggio: dati nel database + PDF su Drive fra gli allegati ──
 function modmGeneraPdf(){
   var foglio=document.getElementById('modmFoglio');
-  return loadScriptOnce('https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js')
-    .then(function(){ return loadScriptOnce('https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js'); })
+  return loadScriptOnce(PDF_LIB_H2C,'html2canvas')
+    .then(function(){ return loadScriptOnce(PDF_LIB_JSPDF,'jspdf.jsPDF'); })
     .then(function(){
       if(!window.html2canvas) throw new Error('pdf_lib');
       modmModalitaStampa(true);
@@ -6604,6 +6657,196 @@ function modmGeneraPdf(){
     });
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// CODA LOCALE DEI MODULI M — il modulo si compila e si firma anche in
+// campagna. Qui restano dati, firma e (se generato) il PDF, finche la
+// linea non torna. IndexedDB regge i file; se manca, si ripiega su
+// localStorage coi soli dati e il PDF si rigenera al momento dell'invio.
+// ═══════════════════════════════════════════════════════════════════
+var MODM_DB='gm_moduli_m', MODM_STORE='coda', MODM_LS='moduliMCoda_v1';
+var _modmDb=null;
+function modmDb(){
+  if(_modmDb) return Promise.resolve(_modmDb);
+  return new Promise(function(res,rej){
+    if(!window.indexedDB){ rej(new Error('no_idb')); return; }
+    var r=indexedDB.open(MODM_DB,1);
+    r.onupgradeneeded=function(e){
+      var db=e.target.result;
+      if(!db.objectStoreNames.contains(MODM_STORE)) db.createObjectStore(MODM_STORE,{keyPath:'chiamata_id'});
+    };
+    r.onsuccess=function(){ _modmDb=r.result; res(_modmDb); };
+    r.onerror=function(){ rej(r.error||new Error('idb')); };
+  });
+}
+function modmCodaScrivi(rec){
+  return modmDb().then(function(db){
+    return new Promise(function(res,rej){
+      var t=db.transaction(MODM_STORE,'readwrite');
+      t.objectStore(MODM_STORE).put(rec);
+      t.oncomplete=function(){ res(true); };
+      t.onerror=function(){ rej(t.error); };
+    });
+  }).catch(function(){
+    // Ripiego: senza IndexedDB si tiene tutto tranne il PDF (si rifara)
+    try{
+      var q=JSON.parse(localStorage.getItem(MODM_LS)||'{}');
+      q[String(rec.chiamata_id)]={chiamata_id:rec.chiamata_id, dati:rec.dati, firmato:rec.firmato, nome:rec.nome, ts:rec.ts};
+      localStorage.setItem(MODM_LS, JSON.stringify(q));
+      return true;
+    }catch(_){ return false; }
+  });
+}
+function modmCodaCancella(callId){
+  return modmDb().then(function(db){
+    return new Promise(function(res){
+      var t=db.transaction(MODM_STORE,'readwrite');
+      t.objectStore(MODM_STORE).delete(callId);
+      t.oncomplete=function(){ res(true); };
+      t.onerror=function(){ res(false); };
+    });
+  }).catch(function(){ return true; }).then(function(){
+    try{
+      var q=JSON.parse(localStorage.getItem(MODM_LS)||'{}');
+      delete q[String(callId)];
+      localStorage.setItem(MODM_LS, JSON.stringify(q));
+    }catch(_){}
+    return true;
+  });
+}
+function modmCodaLeggi(){
+  return modmDb().then(function(db){
+    return new Promise(function(res){
+      var t=db.transaction(MODM_STORE,'readonly');
+      var q=t.objectStore(MODM_STORE).getAll();
+      q.onsuccess=function(){ res(q.result||[]); };
+      q.onerror=function(){ res([]); };
+    });
+  }).catch(function(){
+    try{
+      var o=JSON.parse(localStorage.getItem(MODM_LS)||'{}');
+      return Object.keys(o).map(function(k){ return o[k]; });
+    }catch(_){ return []; }
+  });
+}
+
+// I moduli in coda si vedono subito in elenco, come se fossero gia salvati
+var moduliMLocali={};
+function modmCaricaCodaInMappa(){
+  return modmCodaLeggi().then(function(righe){
+    moduliMLocali={};
+    righe.forEach(function(r){ moduliMLocali[String(r.chiamata_id)]=r; });
+    return moduliMLocali;
+  });
+}
+function modmApplicaLocali(){
+  Object.keys(moduliMLocali).forEach(function(k){
+    var r=moduliMLocali[k];
+    moduliMByCall[k]={ chiamata_id:r.chiamata_id, dati:r.dati, firmato:!!r.firmato,
+                       drive_file_id:null, allegato_id:null, file_name:r.nome||null, inCoda:true };
+  });
+}
+
+// ── Svuotamento della coda: appena c'e linea ──
+var _modmDrenaggio=false;
+function modmCodaDrena(){
+  if(_modmDrenaggio || !isOnline() || !currentUser) return Promise.resolve();
+  _modmDrenaggio=true;
+  return modmCodaLeggi().then(function(righe){
+    if(!righe.length) return null;
+    return ensureFreshToken().then(function(){
+      var catena=Promise.resolve();
+      righe.forEach(function(r){ catena=catena.then(function(){ return modmInvia(r); }); });
+      return catena;
+    });
+  }).then(function(){
+    _modmDrenaggio=false;
+    return modmCaricaCodaInMappa().then(function(){
+      if(typeof getVisibleCallIds==='function'){
+        return caricaModuliM(getVisibleCallIds()).then(function(){ modmApplicaLocali(); injectModmUi(); });
+      }
+    });
+  }).catch(function(){ _modmDrenaggio=false; });
+}
+
+// Invio di UN modulo dalla coda al server (e a Drive, se firmato)
+function modmInvia(rec){
+  var callId=rec.chiamata_id;
+  if(String(callId).indexOf('local_')===0) return Promise.resolve(false);  // la chiamata non e ancora sul server
+  var esistente=moduliMByCall[String(callId)];
+  if(esistente && esistente.inCoda) esistente=null;
+
+  var passo;
+  if(rec.firmato){
+    var pdf=rec.pdf;
+    passo=(pdf ? Promise.resolve(pdf) : modmRigeneraPdf(rec)).then(function(blob){
+      if(!blob) throw new Error('pdf_mancante');
+      var nome=rec.nome||('Modulo M - chiamata '+callId+'.pdf');
+      var file=new File([blob], nome, {type:'application/pdf'});
+      return driveUpload(file).then(function(f){
+        var vecchio=esistente && esistente.drive_file_id;
+        var pulizia=(vecchio && vecchio!==f.id) ? driveDelete(vecchio).catch(function(){}) : Promise.resolve();
+        return pulizia.then(function(){ return {f:f, nome:nome, size:blob.size}; });
+      });
+    }).then(function(up){
+      var vecchioAll=esistente && esistente.allegato_id;
+      return sbFetch('allegati?select=id',{
+        method:'POST', prefer:'return=representation',
+        body:{ chiamata_id:callId, drive_file_id:up.f.id, file_name:up.nome,
+               mime_type:'application/pdf', size_bytes:up.size,
+               user_id: currentUser?currentUser.id:null }
+      }).then(function(r){ return r.json(); }).then(function(rows){
+        var allegatoId=(Array.isArray(rows)&&rows[0])?rows[0].id:null;
+        if(vecchioAll){
+          return sbFetch('allegati?id=eq.'+vecchioAll,{method:'DELETE'}).catch(function(){})
+            .then(function(){ return {allegatoId:allegatoId, up:up}; });
+        }
+        return {allegatoId:allegatoId, up:up};
+      });
+    });
+  } else {
+    passo=Promise.resolve(null);
+  }
+
+  return passo.then(function(x){
+    var corpo={ chiamata_id:callId, dati:rec.dati, firmato:!!rec.firmato,
+                user_id: currentUser?currentUser.id:null };
+    if(x){ corpo.drive_file_id=x.up.f.id; corpo.file_name=x.up.nome; corpo.allegato_id=x.allegatoId; }
+    var req = esistente
+      ? sbFetch('moduli_m?chiamata_id=eq.'+callId,{method:'PATCH',prefer:'return=minimal',body:corpo})
+      : sbFetch('moduli_m',{method:'POST',prefer:'return=minimal',body:corpo});
+    return req.then(function(res){
+      if(!res.ok && res.status!==409) throw new Error('db_'+res.status);
+      return modmCodaCancella(callId).then(function(){ return true; });
+    });
+  }).catch(function(){ return false; });   // resta in coda, si riprova
+}
+
+// Se il PDF non era stato generato (librerie non disponibili in campagna),
+// lo si costruisce ora riusando il foglio, ma solo se nessuno lo sta usando.
+function modmRigeneraPdf(rec){
+  if(modmCallId!=null) return Promise.resolve(null);   // c'e un modulo aperto: non tocco il foglio
+  var foglio=document.getElementById('modmFoglio');
+  if(!foglio) return Promise.resolve(null);
+  var salvaCorrente=modmLeggiDati();
+  return Promise.resolve().then(function(){
+    modmScriviDati(rec.dati||{});
+    modmMisureCampi_sicuro();
+    return modmGeneraPdf();
+  }).then(function(blob){
+    modmScriviDati(salvaCorrente);
+    return blob;
+  }).catch(function(){
+    try{ modmScriviDati(salvaCorrente); }catch(_){}
+    return null;
+  });
+}
+function modmMisureCampi_sicuro(){ try{ modmMisuraCampi(); modmAdattaTutti(); }catch(_){} }
+
+if(typeof window!=='undefined'){
+  window.addEventListener('online', function(){ setTimeout(modmCodaDrena, 1200); });
+  setInterval(function(){ modmCodaDrena(); }, 60000);
+}
+
 // Chiede conferma spiegando che cosa comporta il salvataggio: senza firma
 // il modulo resta una bozza correggibile, con la firma si chiude per sempre.
 function modmChiediSalva(poiChiudi){
@@ -6621,76 +6864,76 @@ function modmChiediSalva(poiChiudi){
   apri('mmodmSalva');
 }
 
-// Genera il PDF, lo carica su Drive e lo registra fra gli allegati
-function modmCaricaPdf(callId, esistente){
-  return modmGeneraPdf().then(function(blob){
-    setModalBusy('mmodm', true, 'Carico il PDF su Google Drive\u2026');
-    var nome='Modulo M - chiamata '+callId+'.pdf';
-    var file=new File([blob], nome, {type:'application/pdf'});
-    // Prima carico il nuovo, poi butto il vecchio: se il caricamento fallisce
-    // la chiamata conserva comunque il modulo che aveva.
-    return driveUpload(file).then(function(f){
-      var vecchio = esistente && esistente.drive_file_id;
-      var pulizia = (vecchio && vecchio!==f.id) ? driveDelete(vecchio).catch(function(){}) : Promise.resolve();
-      return pulizia.then(function(){ return {f:f, nome:nome, size:blob.size}; });
-    });
-  }).then(function(up){
-    setModalBusy('mmodm', true, 'Registro il modulo\u2026');
-    var vecchioAllegato = esistente && esistente.allegato_id;
-    return sbFetch('allegati?select=id',{
-      method:'POST', prefer:'return=representation',
-      body:{ chiamata_id:callId, drive_file_id:up.f.id, file_name:up.nome,
-             mime_type:'application/pdf', size_bytes:up.size,
-             user_id: currentUser?currentUser.id:null }
-    }).then(function(r){ return r.json(); }).then(function(rows){
-      var allegatoId=(Array.isArray(rows)&&rows[0])?rows[0].id:null;
-      if(vecchioAllegato){
-        return sbFetch('allegati?id=eq.'+vecchioAllegato,{method:'DELETE'})
-          .catch(function(){}).then(function(){ return {allegatoId:allegatoId, up:up}; });
-      }
-      return {allegatoId:allegatoId, up:up};
-    });
-  });
-}
-
 function modmSalva(poiChiudi){
   if(!modmCallId){ return Promise.resolve(false); }
-  if(!isOnline()){ fb(false,'Serve connessione','Per salvare il Modulo M serve internet.'); return Promise.resolve(false); }
   var callId=modmCallId;
   var dati=modmLeggiDati();
-  var esistente=moduliMByCall[String(callId)];
   var conFirma=!!modmFirma;
 
   setModalBusy('mmodm', true, conFirma ? 'Preparo il documento\u2026' : 'Salvo la bozza\u2026');
 
-  // Senza firma resta tutto nel database: nessun PDF, nessun file su Drive
-  var caricamento = conFirma ? modmCaricaPdf(callId, esistente) : Promise.resolve(null);
+  // 1. Il PDF si prepara subito (le librerie sono in cache anche offline).
+  //    Se non si riesce, si prosegue lo stesso: si rifara al momento dell'invio.
+  var preparaPdf = conFirma
+    ? modmGeneraPdf().catch(function(){ return null; })
+    : Promise.resolve(null);
 
-  return caricamento.then(function(x){
-    setModalBusy('mmodm', true, 'Registro il modulo\u2026');
-    var corpo={ chiamata_id:callId, dati:dati, firmato:conFirma,
-                user_id: currentUser?currentUser.id:null };
-    if(x){ corpo.drive_file_id=x.up.f.id; corpo.file_name=x.up.nome; corpo.allegato_id=x.allegatoId; }
-    var req = esistente
-      ? sbFetch('moduli_m?chiamata_id=eq.'+callId,{method:'PATCH',prefer:'return=minimal',body:corpo})
-      : sbFetch('moduli_m',{method:'POST',prefer:'return=minimal',body:corpo});
-    return req.then(function(res){ if(!res.ok) throw new Error('db_'+res.status); });
-  }).then(function(){
-    setModalBusy('mmodm', false);
+  return preparaPdf.then(function(blob){
+    setModalBusy('mmodm', true, 'Metto al sicuro sul dispositivo\u2026');
+    return modmCodaScrivi({
+      chiamata_id:callId, dati:dati, firmato:conFirma,
+      pdf:blob||null, nome:'Modulo M - chiamata '+callId+'.pdf',
+      ts:Date.now()
+    }).then(function(ok){ return {ok:ok, blob:blob}; });
+  }).then(function(st){
+    if(!st.ok){
+      // Nemmeno la memoria del dispositivo e disponibile: non si chiude nulla
+      setModalBusy('mmodm', false);
+      fb(false,'Salvataggio non riuscito','La memoria del dispositivo non e disponibile. Non chiudere il modulo: copia altrove i dati importanti e riprova.');
+      throw new Error('storage_locale');
+    }
     modmSnapshot=JSON.stringify(dati);
-    fb(true, conFirma ? 'Modulo M firmato' : 'Bozza salvata',
-       conFirma ? 'Il PDF \u00e8 su Google Drive fra gli allegati della chiamata. Il modulo non \u00e8 pi\u00f9 modificabile.'
-                : 'Resta modificabile finch\u00e9 non apporrai la firma dell\u2019assistito.');
-    if(poiChiudi || conFirma){ chiudi('mmodm'); modmCallId=null; }
-    return caricaModuliM(getVisibleCallIds()).then(function(){
-      return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
-    }).then(function(){ loadRows(PAGE); });
+    // Da qui in poi il modulo NON si perde piu.
+    moduliMLocali[String(callId)]={chiamata_id:callId, dati:dati, firmato:conFirma, nome:'Modulo M - chiamata '+callId+'.pdf'};
+    modmApplicaLocali();
+
+    if(!isOnline()){
+      setModalBusy('mmodm', false);
+      fb(true, conFirma ? 'Modulo M firmato (in attesa di linea)' : 'Bozza salvata sul dispositivo',
+         conFirma ? 'Firma e documento sono al sicuro sul dispositivo: partiranno da soli appena torna la linea.'
+                  : 'Resta modificabile. Verra registrato appena torna la linea.');
+      if(poiChiudi || conFirma){ chiudi('mmodm'); modmCallId=null; }
+      injectModmUi();
+      return true;
+    }
+
+    setModalBusy('mmodm', true, conFirma ? 'Carico su Google Drive\u2026' : 'Registro il modulo\u2026');
+    return modmInvia({chiamata_id:callId, dati:dati, firmato:conFirma, pdf:st.blob, nome:'Modulo M - chiamata '+callId+'.pdf'})
+      .then(function(riuscito){
+        setModalBusy('mmodm', false);
+        if(riuscito){
+          delete moduliMLocali[String(callId)];
+          fb(true, conFirma ? 'Modulo M firmato' : 'Bozza salvata',
+             conFirma ? 'Il PDF \u00e8 su Google Drive fra gli allegati della chiamata. Il modulo non \u00e8 pi\u00f9 modificabile.'
+                      : 'Resta modificabile finch\u00e9 non apporrai la firma dell\u2019assistito.');
+        } else {
+          fb(true, 'Salvato sul dispositivo',
+             'Il server non ha risposto: il modulo \u00e8 al sicuro qui e partir\u00e0 da solo al primo momento utile.');
+        }
+        if(poiChiudi || conFirma){ chiudi('mmodm'); modmCallId=null; }
+        return caricaModuliM(getVisibleCallIds()).then(function(){
+          return modmCaricaCodaInMappa();
+        }).then(function(){
+          modmApplicaLocali();
+          return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
+        }).then(function(){ injectModmUi(); return true; });
+      });
   }).catch(function(e){
     setModalBusy('mmodm', false);
     var em=String((e&&e.message)||'');
-    fb(false,'Salvataggio non riuscito',
-      em.indexOf('pdf_lib')!==-1 ? 'Non sono riuscito a caricare il generatore di PDF. Controlla la connessione e riprova.'
-      : 'Errore durante il salvataggio ('+em+'). Riprova.');
+    if(em!=='storage_locale'){
+      fb(false,'Salvataggio non riuscito','Errore imprevisto ('+em+'). I dati restano nel modulo: riprova.');
+    }
     return false;
   });
 }
@@ -6720,6 +6963,9 @@ function modmElimina(){
   var callId=modmToDelete;
   var m=moduliMByCall[String(callId)];
   if(!m){ chiudi('mmodmDel'); return; }
+  // Via anche dalla coda locale, altrimenti tornerebbe da sola col prossimo invio
+  delete moduliMLocali[String(callId)];
+  modmCodaCancella(callId);
   if(!isOnline()){ fb(false,'Serve connessione','Impossibile eliminare offline.'); return; }
   setModalBusy('mmodmDel', true, 'Elimino il PDF da Drive…');
   var p = m.drive_file_id ? driveDelete(m.drive_file_id).catch(function(){}) : Promise.resolve();
@@ -6763,18 +7009,21 @@ function injectModmUi(){
     if(salvato){
       if(btn) btn.remove();                       // esiste il modulo: via il pulsante M
       // Se lo stato bozza/firmato e cambiato, il blocchetto va rifatto
-      if(wrap && wrap.dataset.firmato !== (salvato.firmato?'1':'0')){ wrap.remove(); wrap=null; }
+      var stato=(salvato.firmato?'1':'0')+(salvato.inCoda?'c':'s');
+      if(wrap && wrap.dataset.firmato !== stato){ wrap.remove(); wrap=null; }
       if(!wrap){
         var dt=tr.querySelector('.dt-wrap');
         if(dt){
           var w=document.createElement('div');
           w.className='modm-link-wrap';
-          w.dataset.firmato = salvato.firmato ? '1' : '0';
+          w.dataset.firmato = (salvato.firmato?'1':'0')+(salvato.inCoda?'c':'s');
           var firmato=!!salvato.firmato;
+          var inCoda=!!salvato.inCoda;
           w.innerHTML='<span class="modm-link" data-row="'+id+'" title="'
-            +(firmato?'Apri il Modulo M firmato (sola lettura)':'Riprendi la compilazione del Modulo M')+'">'
+            +(inCoda?'Salvato sul dispositivo: partira appena torna la linea'
+                   :(firmato?'Apri il Modulo M firmato (sola lettura)':'Riprendi la compilazione del Modulo M'))+'">'
             +svgModuloM()+'Visualizza modulo M</span>'
-            +(firmato?'':'<span class="modm-bozza">bozza</span>')
+            +(inCoda?'<span class="modm-attesa">da inviare</span>':(firmato?'':'<span class="modm-bozza">bozza</span>'))
             +'<span class="modm-del" data-row="'+id+'" title="Elimina il Modulo M">'
             +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>'
             +'</span>';
