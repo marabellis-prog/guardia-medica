@@ -470,6 +470,9 @@ async function setupAuth(){
   setTimeout(function(){ driveWarmup(true); }, 900);
   // Librerie del PDF in cache: il Modulo M si firma anche senza linea
   setTimeout(scaldaLibreriePdf, 2500);
+  // Una volta al giorno: via i documenti rimasti senza chiamata (nel cestino
+  // di Drive, recuperabili). In silenzio, senza mai chiedere permessi.
+  setTimeout(function(){ try{ puliziaDriveAutomatica(); }catch(_){} }, 30000);
   // Moduli M rimasti in tasca dall'ultima uscita: si recuperano e si spediscono
   modmCaricaCodaInMappa().then(function(){ setTimeout(modmCodaDrena, 3000); });
   allegCaricaCodaInMappa().then(function(){ setTimeout(allegCodaDrena, 4000); });
@@ -6323,6 +6326,22 @@ function fileSuDriveDi(filtroChiamate){
     .catch(function(){ return []; });
 }
 
+// Mette un file nel cestino di Drive: sparisce dalla cartella ma resta
+// recuperabile per 30 giorni. Per dei documenti clinici e la scelta giusta.
+function cestinaSuDrive(fileId){
+  return driveFetch('https://www.googleapis.com/drive/v3/files/'+encodeURIComponent(fileId)+'?fields=id',{
+    method:'PATCH', headers:{'Content-Type':'application/json'}, body:JSON.stringify({trashed:true})
+  }).then(function(r){ if(!r.ok && r.status!==404) throw new Error('cestina_'+r.status); return true; });
+}
+function cestinaListaDaDrive(ids){
+  if(!ids || !ids.length) return Promise.resolve(0);
+  var fatti=0, catena=Promise.resolve();
+  ids.forEach(function(id){
+    catena=catena.then(function(){ return cestinaSuDrive(id).then(function(){ fatti++; }).catch(function(){}); });
+  });
+  return catena.then(function(){ return fatti; });
+}
+
 // Cancella una lista di file da Drive, uno per volta, senza fermarsi ai buchi
 function cancellaDaDrive(ids){
   if(!ids || !ids.length) return Promise.resolve(0);
@@ -6372,6 +6391,67 @@ function cercaFileOrfani(){
           return suDrive.filter(function(f){ return !usati[f.id]; });
         });
       });
+  });
+}
+
+// Passata automatica: una volta al giorno, in silenzio.
+var ORFANI_KEY='ultimaPuliziaDrive_v1';
+var ORFANI_ETA_MIN=6*3600*1000;     // si risparmiano i file delle ultime 6 ore
+var ORFANI_MAX_GIRO=10;             // mai piu di dieci per volta
+function puliziaDriveAutomatica(){
+  if(!driveConfigured() || !isOnline() || !currentUser) return Promise.resolve(0);
+  var ultima=parseInt(localStorage.getItem(ORFANI_KEY)||'0',10);
+  if(Date.now()-ultima < 24*3600*1000) return Promise.resolve(0);
+  if(!driveTokenValidoOra()) return Promise.resolve(0);   // niente permesso: si riprova domani
+  localStorage.setItem(ORFANI_KEY, String(Date.now()));
+
+  return inSfondoDrive(function(){
+    return cercaFileOrfaniSicuro().then(function(esito){
+      if(!esito.affidabile || !esito.orfani.length) return 0;
+      var maturi=esito.orfani.filter(function(f){
+        var t=Date.parse(f.createdTime||'');
+        return isNaN(t) ? false : (Date.now()-t > ORFANI_ETA_MIN);
+      }).slice(0, ORFANI_MAX_GIRO);
+      if(!maturi.length) return 0;
+      return cestinaListaDaDrive(maturi.map(function(f){ return f.id; }));
+    });
+  }).catch(function(){ return 0; });
+}
+
+// Come cercaFileOrfani, ma dice anche se il confronto e ATTENDIBILE.
+// Senza questa cautela una lettura fallita del database farebbe sembrare
+// orfano ogni file, e si cancellerebbe tutto.
+function cercaFileOrfaniSicuro(){
+  var suDrive=[], usati={}, letturaOk=true, quantiRegistrati=0;
+  return ensureDriveFolder().then(function(cartella){
+    var q=encodeURIComponent("'"+cartella+"' in parents and trashed=false");
+    var pagina=function(token){
+      var url='https://www.googleapis.com/drive/v3/files?q='+q
+        +'&fields=nextPageToken,files(id,name,createdTime,size)&pageSize=200&spaces=drive'
+        +(token?('&pageToken='+encodeURIComponent(token)):'');
+      return driveFetch(url).then(function(r){ return r.json(); }).then(function(d){
+        if(d && d.files) suDrive=suDrive.concat(d.files);
+        if(d && d.nextPageToken) return pagina(d.nextPageToken);
+        return suDrive;
+      });
+    };
+    return pagina(null);
+  }).then(function(){
+    return sbFetch('allegati?select=drive_file_id').then(function(r){ return r.json(); });
+  }).then(function(a){
+    if(!Array.isArray(a)){ letturaOk=false; return null; }
+    a.forEach(function(x){ if(x.drive_file_id){ usati[x.drive_file_id]=1; quantiRegistrati++; } });
+    return sbFetch('moduli_m?select=drive_file_id').then(function(r){ return r.json(); });
+  }).then(function(m){
+    if(m && !Array.isArray(m)) letturaOk=false;
+    if(Array.isArray(m)) m.forEach(function(x){ if(x.drive_file_id){ usati[x.drive_file_id]=1; quantiRegistrati++; } });
+    var orfani=suDrive.filter(function(f){ return !usati[f.id]; });
+    // Se il database non riporta NIENTE ma su Drive c'e roba, e piu probabile
+    // una lettura andata storta che un archivio interamente abbandonato.
+    var affidabile = letturaOk && !(quantiRegistrati===0 && suDrive.length>0);
+    return {affidabile:affidabile, orfani:orfani, suDrive:suDrive.length, registrati:quantiRegistrati};
+  }).catch(function(){
+    return {affidabile:false, orfani:[], suDrive:0, registrati:0};
   });
 }
 
@@ -8184,9 +8264,15 @@ function setupModmWiring(){
     bCerca.disabled=true; bCerca.innerHTML='<div class="spin"></div> Controllo\u2026';
     if(bElim) bElim.style.display='none';
     scriviEsito('');
-    cercaFileOrfani().then(function(lista){
-      orfaniTrovati=lista||[];
+    cercaFileOrfaniSicuro().then(function(esito){
+      orfaniTrovati=(esito&&esito.orfani)||[];
       bCerca.disabled=false; bCerca.textContent='Cerca documenti abbandonati';
+      if(esito && !esito.affidabile){
+        orfaniTrovati=[];
+        scriviEsito('<b>Controllo non attendibile.</b> L\u2019elenco dal server non \u00e8 arrivato per intero: '
+          +'per prudenza non viene indicato nulla. Riprova fra poco.');
+        return;
+      }
       if(!orfaniTrovati.length){
         scriviEsito('<b>Tutto in ordine:</b> nessun documento abbandonato. Ogni file su Drive appartiene a una chiamata.');
         return;
@@ -8201,7 +8287,7 @@ function setupModmWiring(){
              +'<span class="orfani-data">'+esc(quando)+'</span></div>';
       }).join('');
       scriviEsito('<b>'+orfaniTrovati.length+' document'+(orfaniTrovati.length===1?'o abbandonato':'i abbandonati')+'</b>'
-        +' &mdash; non appartengono a nessuna chiamata:'
+        +' su '+esito.suDrive+' presenti nella cartella ('+esito.registrati+' risultano collegati a una chiamata):'
         +'<div class="orfani-elenco">'+righe+'</div>');
       if(bElim) bElim.style.display='';
     }).catch(function(e){
@@ -8214,15 +8300,17 @@ function setupModmWiring(){
 
   if(bElim) bElim.addEventListener('click', function(){
     if(!orfaniTrovati.length) return;
-    if(!window.confirm('Eliminare definitivamente '+orfaniTrovati.length+' document'
-      +(orfaniTrovati.length===1?'o':'i')+' da Google Drive?\n\nSono file che non appartengono pi\u00f9 ad alcuna chiamata. L\u2019operazione non si pu\u00f2 annullare.')) return;
+    if(!window.confirm('Spostare nel cestino di Google Drive '+orfaniTrovati.length+' document'
+      +(orfaniTrovati.length===1?'o':'i')+'?\n\nSono file che non appartengono pi\u00f9 ad alcuna chiamata. '
+      +'Restano recuperabili dal cestino di Drive per 30 giorni.')) return;
     bElim.disabled=true; bElim.innerHTML='<div class="spin"></div> Elimino\u2026';
-    cancellaDaDrive(orfaniTrovati.map(function(f){ return f.id; })).then(function(fatti){
+    cestinaListaDaDrive(orfaniTrovati.map(function(f){ return f.id; })).then(function(fatti){
       bElim.disabled=false; bElim.textContent='Elimina definitivamente';
       bElim.style.display='none';
       var restano=orfaniTrovati.length-fatti;
       orfaniTrovati=[];
-      scriviEsito('<b>'+fatti+' document'+(fatti===1?'o eliminato':'i eliminati')+'</b> da Google Drive.'
+      scriviEsito('<b>'+fatti+' document'+(fatti===1?'o spostato':'i spostati')+' nel cestino di Google Drive.</b>'
+        +' Recuperabil'+(fatti===1?'e':'i')+' da l\u00ec per 30 giorni.'
         +(restano>0?(' '+restano+' non '+(restano===1?'\u00e8 stato rimosso':'sono stati rimossi')+': riprova.'):''));
     }).catch(function(){
       bElim.disabled=false; bElim.textContent='Elimina definitivamente';
