@@ -1670,3 +1670,11 @@ body{max-width:100%;overflow-x:clip}
   .draft-b{padding:8px 12px;font-size:.78rem}
   #driveBanner ~ .draft-banner,.draft-banner.sotto-drive{top:60px}
 }
+
+/* Finestra aperta: la pagina dietro non si muove e non si può tirare giù.
+   Su iPhone e iPad il tiro verso il basso ricarica la pagina: senza questo
+   blocco basta un dito di troppo per perdere quello che si sta scrivendo. */
+body.pagina-ferma{overflow:hidden}
+html,body{overscroll-behavior-y:none}
+.mov{overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+.mbox,.modm-palco,.modm-sez-corpo,.mail-exist-list{overscroll-behavior:contain}
