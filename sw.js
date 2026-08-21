@@ -4,7 +4,7 @@
 //            network-only per API Supabase (gestita lato app)
 // ═══════════════════════════════════════════════════════════
 
-var CACHE_NAME = 'guardia-medica-v3';
+var CACHE_NAME = 'guardia-medica-v4';
 var APP_SHELL = [
   './',
   './index.html',
@@ -79,6 +79,14 @@ self.addEventListener('fetch', function(event) {
 
   // Supabase JS client (per Realtime) → cache-first
   if (url.hostname === 'cdn.jsdelivr.net' && url.pathname.indexOf('supabase-js') !== -1) {
+    event.respondWith(staleWhileRevalidate(event.request));
+    return;
+  }
+
+  // Generatori del PDF (Modulo M) → cache-first: servono anche in campagna,
+  // dove senza copia locale la firma non si potrebbe portare a termine.
+  if (url.hostname === 'cdn.jsdelivr.net' &&
+      (url.pathname.indexOf('html2canvas') !== -1 || url.pathname.indexOf('jspdf') !== -1)) {
     event.respondWith(staleWhileRevalidate(event.request));
     return;
   }
