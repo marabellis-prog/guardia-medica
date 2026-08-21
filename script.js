@@ -42,7 +42,17 @@ function sbFetch(path,opts){
     body:opts.body!==undefined?JSON.stringify(opts.body):undefined
   };
   if(opts.signal)fetchOpts.signal=opts.signal;
-  return fetch(SUPABASE_URL+'/rest/v1/'+path,fetchOpts);
+  var spedisci=function(){
+    fetchOpts.headers['Authorization']='Bearer '+(currentJwt || SUPABASE_ANON_KEY);
+    return fetch(SUPABASE_URL+'/rest/v1/'+path,fetchOpts);
+  };
+  // Gettone scaduto (lunga inattivita): rinnovo e UNA riprova, in silenzio
+  return spedisci().then(function(res){
+    if(res.status!==401) return res;
+    return ensureFreshToken().then(function(ok){
+      return ok ? spedisci() : res;
+    });
+  });
 }
 
 // Helper per i fetch raw (non via sbFetch) che hanno bisogno di JWT
@@ -259,6 +269,7 @@ function riaggancioRete(){
   ensureFreshToken().then(function(ok){
     if(!ok) return;              // sessione non recuperabile: al riavvio si rifara il login
     avvioSenzaRete=false;
+    aggiornaIndicatoreRete();
     syncProcess();
     safeReloadRows();
     driveWarmup();
@@ -404,11 +415,40 @@ async function authSignOut(){
   // onAuthStateChange triggera il reload
 }
 
+// ── Indicatore di rete nell'intestazione ───────────────────────────
+// Un'occhiata e sai se stai lavorando online o col taccuino di bordo.
+function creaIndicatoreRete(){
+  if(document.getElementById('netDot')) return;
+  var menu=document.getElementById('userMenu');
+  if(!menu || !menu.parentNode) return;
+  var d=document.createElement('div');
+  d.id='netDot';
+  menu.parentNode.insertBefore(d, menu);
+  aggiornaIndicatoreRete();
+}
+function aggiornaIndicatoreRete(){
+  var d=document.getElementById('netDot');
+  if(!d) return;
+  var online = isOnline() && !avvioSenzaRete;
+  d.className='net-dot '+(online?'net-on':'net-off');
+  d.title = online
+    ? 'Online: tutto si salva direttamente sul server'
+    : 'Offline: le chiamate si salvano sul dispositivo e partiranno da sole al ritorno della linea';
+  d.innerHTML = online
+    ? '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>'
+    : '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>';
+}
+if(typeof window!=='undefined'){
+  window.addEventListener('online', aggiornaIndicatoreRete);
+  window.addEventListener('offline', aggiornaIndicatoreRete);
+}
+
 // User menu rendering
 function renderUserMenu(){
   if(!currentUser) return;
   var menu = document.getElementById('userMenu');
   if(!menu) return;
+  creaIndicatoreRete();
   menu.style.display = '';
   var initial = (currentUser.full_name||currentUser.email||'?').charAt(0).toUpperCase();
   document.getElementById('userMenuAvatar').textContent = initial;
@@ -5442,19 +5482,20 @@ function driveGetBlob(fileId){
 
 // ── Metadati allegati (Supabase) ─────────────────────────────────────
 function loadAttachmentsForCalls(callIds){
-  attachmentsByCall={};
   var ids=(callIds||[]).filter(function(x){return x && String(x).indexOf('local_')!==0;});
-  if(!ids.length) return Promise.resolve({});
+  if(!ids.length){ attachmentsByCall={}; return Promise.resolve({}); }
   return sbFetch('allegati?chiamata_id=in.('+ids.join(',')+')&order=created_at.asc&select=*')
     .then(function(r){return r.json();})
     .then(function(rows){
-      if(!Array.isArray(rows)) return {};
+      if(!Array.isArray(rows)) return attachmentsByCall;   // risposta d'errore: si tiene la mappa nota
+      var nuova={};
       rows.forEach(function(a){
         var k=String(a.chiamata_id);
-        (attachmentsByCall[k]=attachmentsByCall[k]||[]).push(a);
+        (nuova[k]=nuova[k]||[]).push(a);
       });
+      attachmentsByCall=nuova;
       return attachmentsByCall;
-    }).catch(function(){ return {}; });
+    }).catch(function(){ return attachmentsByCall; });     // rete assente: idem
 }
 
 // Inietta le righe "Allegati" sotto ogni chiamata che ne ha (post-render)
@@ -6656,15 +6697,17 @@ function modmSalva(poiChiudi){
 
 // ── Elenco moduli esistenti (per sapere dove mostrare la M) ──
 function caricaModuliM(callIds){
-  moduliMByCall={};
   var ids=(callIds||[]).filter(function(x){ return x && String(x).indexOf('local_')!==0; });
-  if(!ids.length) return Promise.resolve({});
+  if(!ids.length){ moduliMByCall={}; return Promise.resolve({}); }
   return sbFetch('moduli_m?chiamata_id=in.('+ids.join(',')+')&select=*')
     .then(function(r){ return r.json(); })
     .then(function(rows){
-      if(Array.isArray(rows)) rows.forEach(function(m){ moduliMByCall[String(m.chiamata_id)]=m; });
+      if(!Array.isArray(rows)) return moduliMByCall;       // errore: si tiene la mappa nota
+      var nuova={};
+      rows.forEach(function(m){ nuova[String(m.chiamata_id)]=m; });
+      moduliMByCall=nuova;
       return moduliMByCall;
-    }).catch(function(){ return {}; });
+    }).catch(function(){ return moduliMByCall; });
 }
 
 // ── Eliminazione ──
