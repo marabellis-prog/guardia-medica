@@ -296,9 +296,63 @@ function riaggancioRete(){
     scaldaLibreriePdf();     // chi era partito offline non le aveva ancora
   });
 }
+// ── Vigilanza della linea ───────────────────────────────────────────
+// Gli avvisi del browser sul ritorno della connessione arrivano tardi, o non
+// arrivano affatto (e «collegato» puo voler dire wifi senza internet). Finche
+// c'e qualcosa da inviare si tasta il polso da soli, ogni pochi secondi.
+// Il controllo va sulla PAGINA DELL'APP, non sul database: nessun consumo
+// di traffico sul database. E quando non c'e nulla in coda, non parte affatto.
+var _vigileRete=null, _reteViva=null, _pingInCorso=false;
+function pingRete(){
+  if(_pingInCorso) return Promise.resolve(null);
+  _pingInCorso=true;
+  return fetch('./favicon.png?rete='+Date.now(), {method:'HEAD', cache:'no-store'})
+    .then(function(r){ _pingInCorso=false; return !!(r && (r.ok || r.status===0)); })
+    .catch(function(){ _pingInCorso=false; return false; });
+}
+function controllaRete(){
+  if(!cosePendenti()){ fermaVigilanzaRete(); return; }
+  pingRete().then(function(viva){
+    if(viva===null) return;
+    if(viva && _reteViva!==true){
+      _reteViva=true;
+      rimuoviAvvisoOffline();
+      try{ aggiornaIndicatoreRete(); }catch(_){}
+      riaggancioRete();
+      drenaTuttoSubito();
+    } else if(!viva){
+      _reteViva=false;
+    }
+  });
+}
+function avviaVigilanzaRete(){
+  if(_vigileRete) return;
+  if(!cosePendenti()) return;
+  _vigileRete=setInterval(controllaRete, 5000);
+  controllaRete();
+}
+function fermaVigilanzaRete(){
+  if(_vigileRete){ clearInterval(_vigileRete); _vigileRete=null; }
+}
+// Tutto quel che deve partire, subito e insieme
+function drenaTuttoSubito(){
+  try{ syncProcess(); }catch(_){}
+  try{ modmCodaDrena(); }catch(_){}
+  try{ allegCodaDrena(); }catch(_){}
+}
+
 if(typeof window!=='undefined'){
-  window.addEventListener('online', riaggancioRete);
-  window.addEventListener('offline', function(){ if(currentUser) mostraAvvisoOffline(); });
+  window.addEventListener('online', function(){ _reteViva=true; riaggancioRete(); drenaTuttoSubito(); });
+  window.addEventListener('offline', function(){
+    _reteViva=false;
+    if(currentUser) mostraAvvisoOffline();
+    avviaVigilanzaRete();
+  });
+  // Tornando sull'app dopo averla lasciata: si controlla subito
+  document.addEventListener('visibilitychange', function(){
+    if(document.hidden) return;
+    if(cosePendenti()){ avviaVigilanzaRete(); controllaRete(); }
+  });
 }
 
 async function setupAuth(){
@@ -419,6 +473,8 @@ async function setupAuth(){
   // Moduli M rimasti in tasca dall'ultima uscita: si recuperano e si spediscono
   modmCaricaCodaInMappa().then(function(){ setTimeout(modmCodaDrena, 3000); });
   allegCaricaCodaInMappa().then(function(){ setTimeout(allegCodaDrena, 4000); });
+  // Se e rimasto qualcosa in sospeso, si tiene d'occhio la linea
+  setTimeout(function(){ try{ avviaVigilanzaRete(); }catch(_){} }, 5000);
   // Il profilo resta a bordo: e la chiave per aprire l'app anche senza rete
   salvaProfiloOffline(currentUser);
 }
@@ -2456,6 +2512,7 @@ function syncEnqueueInsert(clientUuid, body){
   q.push({type:'insert', client_uuid:clientUuid, body:body, ts:Date.now(), attempts:0});
   var ok=syncSaveQueue(q);
   syncRenderBadge();
+  try{ avviaVigilanzaRete(); }catch(_){}
   return ok; // false = localStorage non disponibile (modalità privata / memoria piena)
 }
 function syncDequeueInsert(clientUuid){
@@ -6094,7 +6151,8 @@ function allegCodaDrena(){
   _allegDrenaggio=true;
   return allegCodaLeggi().then(function(righe){
     var utili=righe.filter(function(r){ return String(r.chiamata_id).indexOf('local_')!==0; });
-    if(!utili.length) return null;
+    // Niente da inviare: si esce SENZA interrogare il database
+    if(!utili.length) return false;
     return ensureFreshToken().then(function(){
       var catena=Promise.resolve(), fatti=0;
       utili.forEach(function(r){
@@ -6107,10 +6165,14 @@ function allegCodaDrena(){
           });
         });
       });
-      return catena;
+      return catena.then(function(){ return true; });
     });
-  }).then(function(){
+  }).then(function(cerano){
     _allegDrenaggio=false; allegInCorso=null; fineInvio();
+    if(!cerano){
+      if(_allegDaRifare){ _allegDaRifare=false; return allegCodaDrena(); }
+      return;
+    }
     return allegCaricaCodaInMappa().then(function(){
       if(typeof getVisibleCallIds==='function'){
         return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
@@ -7326,7 +7388,26 @@ function modmModalitaStampa(attiva){
 }
 
 // ── Salvataggio: dati nel database + PDF su Drive fra gli allegati ──
+// Tetto di tempo: il generatore di immagini, su alcuni dispositivi, puo non
+// rispondere mai. Senza un limite lo spinner girava all'infinito e il Modulo M
+// non entrava nemmeno in coda: restava nel nulla.
+var PDF_ATTESA_MAX=30000;
 function modmGeneraPdf(){
+  return new Promise(function(risolvi, rifiuta){
+    var chiuso=false;
+    var scadenza=setTimeout(function(){
+      if(chiuso) return; chiuso=true;
+      try{ modmModalitaStampa(false); }catch(_){}
+      rifiuta(new Error('pdf_lento'));
+    }, PDF_ATTESA_MAX);
+    modmGeneraPdfInterno().then(function(b){
+      if(chiuso) return; chiuso=true; clearTimeout(scadenza); risolvi(b);
+    }).catch(function(e){
+      if(chiuso) return; chiuso=true; clearTimeout(scadenza); rifiuta(e);
+    });
+  });
+}
+function modmGeneraPdfInterno(){
   var foglio=document.getElementById('modmFoglio');
   return loadScriptOnce(PDF_LIB_H2C,'html2canvas')
     .then(function(){ return loadScriptOnce(PDF_LIB_JSPDF,'jspdf.jsPDF'); })
@@ -7452,7 +7533,8 @@ function modmCodaDrena(){
   if(!isOnline() || !currentUser) return Promise.resolve();
   _modmDrenaggio=true;
   return modmCodaLeggi().then(function(righe){
-    if(!righe.length) return null;
+    // Coda vuota: si esce SENZA interrogare il database (niente traffico sprecato)
+    if(!righe.length) return false;
     return ensureFreshToken().then(function(){
       var catena=Promise.resolve(), fatti=0;
       righe.forEach(function(r){
@@ -7461,10 +7543,14 @@ function modmCodaDrena(){
           return modmInvia(r).then(function(e){ fatti++; return e; });
         });
       });
-      return catena;
+      return catena.then(function(){ return true; });
     });
-  }).then(function(){
+  }).then(function(cerano){
     _modmDrenaggio=false; fineInvio();
+    if(!cerano){
+      if(_modmDaRifare){ _modmDaRifare=false; return modmCodaDrena(); }
+      return;
+    }
     return modmCaricaCodaInMappa().then(function(){
       if(typeof getVisibleCallIds==='function'){
         return caricaModuliM(getVisibleCallIds()).then(function(){ modmApplicaLocali(); injectModmUi(); });
@@ -7625,6 +7711,8 @@ function modmSalva(poiChiudi){
 
   // 1. Il PDF si prepara subito (le librerie sono in cache anche offline).
   //    Se non si riesce, si prosegue lo stesso: si rifara al momento dell'invio.
+  // Se il documento non si riesce a produrre adesso (generatore lento o
+  // assente) NON ci si blocca: si salva lo stesso e il PDF si rifa all'invio.
   var preparaPdf = conFirma
     ? modmGeneraPdf().catch(function(){ return null; })
     : Promise.resolve(null);
