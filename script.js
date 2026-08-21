@@ -2637,6 +2637,7 @@ function syncProcess(){
   ensureFreshToken().then(function(){
     var q2=syncLoadQueue();
     if(!q2.length)return;
+    segnalaInvio(q2.length===1?'la chiamata':'le chiamate', 0, q2.length);
     markOwnWrite();
     Promise.all(q2.map(function(entry){
       entry.attempts=(entry.attempts||0)+1;
@@ -2659,6 +2660,7 @@ function syncProcess(){
         return !okKeys[k];
       });
       syncSaveQueue(newQ);
+      fineInvio();
       // Le chiamate appena registrate portano con se il loro Modulo M
       q2.forEach(function(e){
         if(e.type==='insert' && okKeys['ins:'+e.client_uuid]) agganciaNumeroVero(e.client_uuid);
@@ -2671,28 +2673,56 @@ function syncProcess(){
   });
 }
 
+// Che cosa sta partendo in questo momento: serve a farlo vedere.
+var invioInCorso={attivo:false, cosa:'', fatti:0, totale:0};
+function segnalaInvio(cosa, fatti, totale){
+  invioInCorso={attivo:true, cosa:cosa, fatti:fatti, totale:totale};
+  syncRenderBadge();
+}
+function fineInvio(){
+  invioInCorso={attivo:false, cosa:'', fatti:0, totale:0};
+  syncRenderBadge();
+}
+function plur(n, uno, molti){ return n+' '+(n===1?uno:molti); }
+
 function syncRenderBadge(){
   var q=syncLoadQueue();
+  var inserts=q.filter(function(e){return e.type==='insert';}).length;
+  var updates=q.length-inserts;
+  var moduli=Object.keys(moduliMLocali||{}).length;
+  var alleg=0;
+  try{ Object.keys(allegatiLocali||{}).forEach(function(k){ alleg+=(allegatiLocali[k]||[]).length; }); }catch(_){}
+  var totale=inserts+updates+moduli+alleg;
+
   var existing=document.getElementById('syncBadge');
-  if(q.length===0){if(existing)existing.remove();return;}
+  if(totale===0 && !invioInCorso.attivo){ if(existing)existing.remove(); return; }
   if(!existing){
     existing=document.createElement('div');
     existing.id='syncBadge';
-    existing.title='Clicca per riprovare adesso';
-    existing.addEventListener('click',function(){syncProcess();});
+    existing.title='Tocca per provare a inviare adesso';
+    existing.addEventListener('click',function(){
+      syncProcess(); modmCodaDrena(); allegCodaDrena();
+    });
     document.body.appendChild(existing);
   }
-  var offline=(typeof navigator!=='undefined'&&navigator.onLine===false);
-  var inserts=q.filter(function(e){return e.type==='insert';}).length;
-  var updates=q.length-inserts;
-  var label;
-  if(inserts>0 && updates>0){
-    label=inserts+' chiamat'+(inserts===1?'a':'e')+' + '+updates+' modific'+(updates===1?'a':'he')+' da inviare';
-  } else if(inserts>0){
-    label=inserts+' chiamat'+(inserts===1?'a nuova':'e nuove')+' da inviare';
-  } else {
-    label=updates+' modific'+(updates===1?'a':'he')+' in attesa';
+  var offline=!isOnline();
+
+  // ── Invio in corso: si vede la rotellina e a che punto siamo ──
+  if(invioInCorso.attivo){
+    var avanz = invioInCorso.totale>1 ? (' ('+Math.min(invioInCorso.fatti+1,invioInCorso.totale)+' di '+invioInCorso.totale+')') : '';
+    existing.className='sync-badge in-corso';
+    existing.innerHTML='<span class="sync-rotella"></span>'
+      +'<span>Invio '+esc(invioInCorso.cosa)+avanz+'\u2026</span>';
+    return;
   }
+
+  var pezzi=[];
+  if(inserts) pezzi.push(plur(inserts,'chiamata','chiamate'));
+  if(updates) pezzi.push(plur(updates,'modifica','modifiche'));
+  if(moduli)  pezzi.push(plur(moduli,'Modulo M','Moduli M'));
+  if(alleg)   pezzi.push(plur(alleg,'allegato','allegati'));
+  var label=pezzi.join(' + ')+' da inviare';
+
   existing.className='sync-badge'+(offline?' offline':'');
   existing.innerHTML=
     '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">'
@@ -6032,31 +6062,52 @@ function allegCaricaCodaInMappa(){
       var k=String(r.chiamata_id);
       (allegatiLocali[k]=allegatiLocali[k]||[]).push(r);
     });
+    try{ syncRenderBadge(); }catch(_){}
     return allegatiLocali;
   });
 }
 
 // Svuotamento: un file per volta, con prudenza.
 var _allegDrenaggio=false;
+var _allegDaRifare=false;   // e arrivata una richiesta mentre eravamo occupati
+var allegInCorso=null;      // quale allegato sta salendo proprio adesso
 function allegCodaDrena(){
-  if(_allegDrenaggio || !isOnline() || !currentUser) return Promise.resolve();
+  // Occupato? La richiesta non si butta via: si rifa appena finito. Senza
+  // questo, un allegato rimappato mentre era in corso un invio doveva
+  // aspettare il giro periodico - anche minuti.
+  if(_allegDrenaggio){ _allegDaRifare=true; return Promise.resolve(); }
+  if(!isOnline() || !currentUser) return Promise.resolve();
   _allegDrenaggio=true;
   return allegCodaLeggi().then(function(righe){
     var utili=righe.filter(function(r){ return String(r.chiamata_id).indexOf('local_')!==0; });
     if(!utili.length) return null;
     return ensureFreshToken().then(function(){
-      var catena=Promise.resolve();
-      utili.forEach(function(r){ catena=catena.then(function(){ return allegInvia(r); }); });
+      var catena=Promise.resolve(), fatti=0;
+      utili.forEach(function(r){
+        catena=catena.then(function(){
+          segnalaInvio(utili.length===1?'l\u2019allegato':'gli allegati', fatti, utili.length);
+          allegInCorso=r.id; injectAttachRows();
+          return allegInvia(r).then(function(esito){
+            fatti++; allegInCorso=null;
+            return esito;
+          });
+        });
+      });
       return catena;
     });
   }).then(function(){
-    _allegDrenaggio=false;
+    _allegDrenaggio=false; allegInCorso=null; fineInvio();
     return allegCaricaCodaInMappa().then(function(){
       if(typeof getVisibleCallIds==='function'){
         return loadAttachmentsForCalls(getVisibleCallIds()).then(injectAttachRows);
       }
+    }).then(function(){
+      if(_allegDaRifare){ _allegDaRifare=false; return allegCodaDrena(); }
     });
-  }).catch(function(){ _allegDrenaggio=false; });
+  }).catch(function(){
+    _allegDrenaggio=false; allegInCorso=null; fineInvio();
+    if(_allegDaRifare){ _allegDaRifare=false; allegCodaDrena(); }
+  });
 }
 
 // Invio di UN allegato. Il file locale si cancella solo quando la riga negli
@@ -6089,7 +6140,7 @@ function allegInvia(rec){
 
 if(typeof window!=='undefined'){
   window.addEventListener('online', function(){ setTimeout(allegCodaDrena, 1500); });
-  setInterval(function(){ allegCodaDrena(); }, 60000);
+  setInterval(function(){ allegCodaDrena(); }, 20000);
 }
 
 // ── Metadati allegati (Supabase) ─────────────────────────────────────
@@ -6147,11 +6198,14 @@ function injectAttachRows(){
 }
 function attachItemHtml(a){
   if(a.inAttesa){
+    var sale = (typeof allegInCorso!=='undefined' && allegInCorso===a.id);
     // Ancora sul dispositivo: si mostra ma non si puo aprire ne cancellare
-    return '<span class="attach-item attach-attesa" data-locale="'+esc(a.id)+'" title="Al sicuro sul dispositivo: salira su Drive appena torna la linea">'
-      +'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>'
+    return '<span class="attach-item attach-attesa'+(sale?' attach-sale':'')+'" data-locale="'+esc(a.id)+'" title="'
+      +(sale?'Sta salendo su Google Drive\u2026':'Al sicuro sul dispositivo: salira su Drive appena torna la linea')+'">'
+      +(sale ? '<span class="sync-rotella piccola"></span>'
+             : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>')
       +'<span class="attach-fname">'+esc(a.file_name)+'</span>'
-      +'<span class="attach-attesa-tag">da inviare</span>'
+      +'<span class="attach-attesa-tag">'+(sale?'invio\u2026':'da inviare')+'</span>'
     +'</span>';
   }
   return '<span class="attach-item" data-id="'+a.id+'" data-drive="'+esc(a.drive_file_id)+'" data-name="'+esc(a.file_name)+'">'
@@ -7364,6 +7418,7 @@ function modmCaricaCodaInMappa(){
   return modmCodaLeggi().then(function(righe){
     moduliMLocali={};
     righe.forEach(function(r){ moduliMLocali[String(r.chiamata_id)]=r; });
+    try{ syncRenderBadge(); }catch(_){}
     return moduliMLocali;
   });
 }
@@ -7377,24 +7432,36 @@ function modmApplicaLocali(){
 
 // ── Svuotamento della coda: appena c'e linea ──
 var _modmDrenaggio=false;
+var _modmDaRifare=false;
 function modmCodaDrena(){
-  if(_modmDrenaggio || !isOnline() || !currentUser) return Promise.resolve();
+  if(_modmDrenaggio){ _modmDaRifare=true; return Promise.resolve(); }
+  if(!isOnline() || !currentUser) return Promise.resolve();
   _modmDrenaggio=true;
   return modmCodaLeggi().then(function(righe){
     if(!righe.length) return null;
     return ensureFreshToken().then(function(){
-      var catena=Promise.resolve();
-      righe.forEach(function(r){ catena=catena.then(function(){ return modmInvia(r); }); });
+      var catena=Promise.resolve(), fatti=0;
+      righe.forEach(function(r){
+        catena=catena.then(function(){
+          segnalaInvio(righe.length===1?'il Modulo M':'i Moduli M', fatti, righe.length);
+          return modmInvia(r).then(function(e){ fatti++; return e; });
+        });
+      });
       return catena;
     });
   }).then(function(){
-    _modmDrenaggio=false;
+    _modmDrenaggio=false; fineInvio();
     return modmCaricaCodaInMappa().then(function(){
       if(typeof getVisibleCallIds==='function'){
         return caricaModuliM(getVisibleCallIds()).then(function(){ modmApplicaLocali(); injectModmUi(); });
       }
+    }).then(function(){
+      if(_modmDaRifare){ _modmDaRifare=false; return modmCodaDrena(); }
     });
-  }).catch(function(){ _modmDrenaggio=false; });
+  }).catch(function(){
+    _modmDrenaggio=false; fineInvio();
+    if(_modmDaRifare){ _modmDaRifare=false; modmCodaDrena(); }
+  });
 }
 
 // Invio di UN modulo dalla coda al server (e a Drive, se firmato)
@@ -7475,7 +7542,7 @@ function modmMisureCampi_sicuro(){ try{ modmMisuraCampi(); modmAdattaTutti(); }c
 
 if(typeof window!=='undefined'){
   window.addEventListener('online', function(){ setTimeout(modmCodaDrena, 1200); });
-  setInterval(function(){ modmCodaDrena(); }, 60000);
+  setInterval(function(){ modmCodaDrena(); }, 20000);
 }
 
 // Una chiamata scritta offline non ha ancora un numero: il Modulo M compilato
