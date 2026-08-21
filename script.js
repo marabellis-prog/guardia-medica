@@ -2675,13 +2675,27 @@ function syncProcess(){
 
 // Che cosa sta partendo in questo momento: serve a farlo vedere.
 var invioInCorso={attivo:false, cosa:'', fatti:0, totale:0};
+var _invioDa=0, _fineRimandata=null;
 function segnalaInvio(cosa, fatti, totale){
+  if(!invioInCorso.attivo) _invioDa=Date.now();
+  if(_fineRimandata){ clearTimeout(_fineRimandata); _fineRimandata=null; }
   invioInCorso={attivo:true, cosa:cosa, fatti:fatti, totale:totale};
   syncRenderBadge();
 }
+// Se l'invio dura un istante l'avviso farebbe solo un lampo: lo si tiene
+// visibile un momento, quel tanto che basta per accorgersene.
 function fineInvio(){
-  invioInCorso={attivo:false, cosa:'', fatti:0, totale:0};
-  syncRenderBadge();
+  if(!invioInCorso.attivo) return;
+  var restano=700-(Date.now()-_invioDa);
+  var spegni=function(){
+    _fineRimandata=null;
+    invioInCorso={attivo:false, cosa:'', fatti:0, totale:0};
+    syncRenderBadge();
+  };
+  if(restano>0){
+    if(_fineRimandata) clearTimeout(_fineRimandata);
+    _fineRimandata=setTimeout(spegni, restano);
+  } else spegni();
 }
 function plur(n, uno, molti){ return n+' '+(n===1?uno:molti); }
 
@@ -7633,6 +7647,7 @@ function modmSalva(poiChiudi){
     // Da qui in poi il modulo NON si perde piu.
     moduliMLocali[String(callId)]={chiamata_id:callId, dati:dati, firmato:conFirma, nome:'Modulo M - chiamata '+callId+'.pdf'};
     modmApplicaLocali();
+    try{ syncRenderBadge(); }catch(_){}
 
     if(!isOnline()){
       setModalBusy('mmodm', false);
