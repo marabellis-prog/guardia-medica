@@ -7364,7 +7364,9 @@ function modmInvia(rec){
     var pdf=rec.pdf;
     passo=(pdf ? Promise.resolve(pdf) : modmRigeneraPdf(rec)).then(function(blob){
       if(!blob) throw new Error('pdf_mancante');
-      var nome=rec.nome||('Modulo M - chiamata '+callId+'.pdf');
+      // Il nome si ricalcola ora: se il modulo era stato compilato prima che
+      // la chiamata avesse un numero, porterebbe ancora l'etichetta provvisoria.
+      var nome='Modulo M - chiamata '+callId+'.pdf';
       var file=new File([blob], nome, {type:'application/pdf'});
       return driveUpload(file).then(function(f){
         var vecchio=esistente && esistente.drive_file_id;
@@ -7443,6 +7445,7 @@ function modmRimappaLocale(clientUuid, idVero){
     var nuovo={};
     Object.keys(rec).forEach(function(k){ nuovo[k]=rec[k]; });
     nuovo.chiamata_id=idVero;
+    nuovo.nome='Modulo M - chiamata '+idVero+'.pdf';
     delete moduliMLocali[chiaveVecchia];
     delete moduliMByCall[chiaveVecchia];
     moduliMLocali[String(idVero)]=nuovo;
