@@ -2773,10 +2773,8 @@ function syncRenderBadge(){
   if(!existing){
     existing=document.createElement('div');
     existing.id='syncBadge';
-    existing.title='Tocca per provare a inviare adesso';
-    existing.addEventListener('click',function(){
-      syncProcess(); modmCodaDrena(); allegCodaDrena();
-    });
+    existing.title='Tocca per vedere che cosa deve ancora partire';
+    existing.addEventListener('click', apriElencoCoda);
     document.body.appendChild(existing);
   }
   var offline=!isOnline();
@@ -2805,6 +2803,98 @@ function syncRenderBadge(){
         :'<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>')
     +'</svg>'
     +'<span>'+(offline?'Offline · ':'')+label+'</span>';
+}
+
+// ── Che cosa deve ancora partire ────────────────────────────────────
+function apriElencoCoda(){
+  apri('mcoda');
+  disegnaElencoCoda();
+}
+function disegnaElencoCoda(){
+  var box=document.getElementById('codaElenco');
+  if(!box) return;
+  box.innerHTML='<div class="coda-vuota">Controllo\u2026</div>';
+  Promise.all([modmCodaLeggi(), allegCodaLeggi()]).then(function(r){
+    var moduli=r[0]||[], alleg=r[1]||[];
+    var q=syncLoadQueue();
+    var righe=[];
+
+    q.filter(function(e){ return e.type==='insert'; }).forEach(function(e){
+      var d=((e.body&&e.body.descrizione)||'').split('\n')[0]||'senza descrizione';
+      righe.push(voceCoda('chiamata','Chiamata nuova', d, 'ins:'+e.client_uuid));
+    });
+    q.filter(function(e){ return e.type!=='insert'; }).forEach(function(e){
+      righe.push(voceCoda('modifica','Modifica alla chiamata '+e.id,
+        Object.keys(e.body||{}).join(', ')||'\u2014', 'upd:'+e.id));
+    });
+    moduli.forEach(function(m){
+      var dove=String(m.chiamata_id).indexOf('local_')===0 ? 'chiamata non ancora registrata' : ('chiamata '+m.chiamata_id);
+      var stato=m.firmato ? 'firmato' : 'bozza';
+      righe.push(voceCoda('modulo','Modulo M ('+stato+')', dove, 'modm:'+m.chiamata_id));
+    });
+    alleg.forEach(function(a){
+      var dove=String(a.chiamata_id).indexOf('local_')===0 ? 'chiamata non ancora registrata' : ('chiamata '+a.chiamata_id);
+      righe.push(voceCoda('allegato', a.nome||'allegato', dove, 'all:'+a.id));
+    });
+
+    if(!righe.length){
+      box.innerHTML='<div class="coda-vuota">Non c\u2019\u00e8 nulla in attesa: tutto \u00e8 gi\u00e0 sul server.</div>';
+      return;
+    }
+    box.innerHTML=righe.join('');
+  }).catch(function(){
+    box.innerHTML='<div class="coda-vuota">Non riesco a leggere la memoria del dispositivo.</div>';
+  });
+}
+function voceCoda(tipo, titolo, sotto, chiave){
+  var icone={
+    chiamata:'<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+    modifica:'<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+    modulo:'<rect x="3" y="2.5" width="18" height="19" rx="2.5"/><path d="M7.5 16.5V8.5l4.5 5 4.5-5v8"/>',
+    allegato:'<path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/>'
+  };
+  return '<div class="coda-riga" data-chiave="'+esc(chiave)+'">'
+    +'<svg class="coda-ic coda-ic-'+tipo+'" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'+icone[tipo]+'</svg>'
+    +'<span class="coda-testo"><b>'+esc(titolo)+'</b><span class="coda-sotto">'+esc(sotto)+'</span></span>'
+    +'<button type="button" class="coda-del" title="Togli dalla coda: non verr\u00e0 inviato">'
+      +'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/></svg>'
+    +'</button></div>';
+}
+function togliDallaCoda(chiave){
+  var p=chiave.indexOf(':');
+  var tipo=chiave.slice(0,p), id=chiave.slice(p+1);
+  var lavoro;
+  if(tipo==='ins') lavoro=Promise.resolve(syncDequeueInsert(id));
+  else if(tipo==='upd') lavoro=Promise.resolve(syncDequeue(id));
+  else if(tipo==='modm'){ delete moduliMLocali[id]; delete moduliMByCall[id]; lavoro=modmCodaCancella(id); }
+  else if(tipo==='all') lavoro=allegCodaCancella(id);
+  else lavoro=Promise.resolve();
+  return Promise.resolve(lavoro).then(function(){
+    return Promise.all([modmCaricaCodaInMappa(), allegCaricaCodaInMappa()]);
+  }).then(function(){
+    syncRenderBadge();
+    disegnaElencoCoda();
+    try{ injectModmUi(); injectAttachRows(); }catch(_){}
+  });
+}
+if(typeof document!=='undefined'){
+  document.addEventListener('click', function(e){
+    if(!e.target || !e.target.closest) return;
+    var del=e.target.closest('#codaElenco .coda-del');
+    if(del){
+      var riga=del.closest('.coda-riga');
+      if(riga && window.confirm('Togliere questa voce dalla coda?\n\nNon verr\u00e0 inviata al server e i suoi dati andranno persi.')){
+        togliDallaCoda(riga.dataset.chiave);
+      }
+      return;
+    }
+    if(e.target===document.getElementById('mcoda')) chiudi('mcoda');
+    if(e.target.closest && e.target.closest('#btnCodaClose,#btnCodaChiudi2')) chiudi('mcoda');
+    if(e.target.closest && e.target.closest('#btnCodaInvia')){
+      drenaTuttoSubito();
+      setTimeout(disegnaElencoCoda, 1500);
+    }
+  });
 }
 
 // Innesco automatico: quando torna la connessione + ogni 30s + al boot
