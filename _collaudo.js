@@ -52,9 +52,6 @@ function installa(){
   vero.driveConfigured = window.driveConfigured;
   vero.ensureFreshToken = window.ensureFreshToken;
   vero.fb = window.fb;
-  vero.loadRows = window.loadRows;
-  vero.hideLoader = window.hideLoader;
-  vero.getVisibleCallIds = window.getVisibleCallIds;
   vero.modmGeneraPdf = window.modmGeneraPdf;
 
   window.isOnline = function(){ return S.linea; };
@@ -63,14 +60,6 @@ function installa(){
   window.ensureDriveFolder = function(){ return S.linea ? Promise.resolve('cartella') : Promise.reject(new TypeError('offline')); };
   window.getDriveToken = function(){ return S.linea ? Promise.resolve('tok') : Promise.reject(new Error('no_token')); };
   window.fb = function(ok,t,m){ traccia('avviso: '+t); };
-  window.hideLoader = function(){};
-  window.loadRows = function(){ return Promise.resolve(); };
-  window.getVisibleCallIds = function(){
-    var o=[];
-    document.querySelectorAll('#tbody tr[data-row]').forEach(function(t){ o.push(t.dataset.row); });
-    document.querySelectorAll('#tbody tr.local-pending').forEach(function(t){ o.push('local_'+t.dataset.uuid); });
-    return o;
-  };
 
   // ── Google Drive finto ──
   window.driveUpload = function(file){
