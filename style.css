@@ -1617,3 +1617,16 @@ body{max-width:100%;overflow-x:clip}
   .drive-banner{top:6px;font-size:.8rem;padding:9px 12px}
   .offline-banner{bottom:76px} /* sopra il badge della coda, non sotto il pollice */
 }
+
+/* Indicatore di rete nell'intestazione: verde = online, arancio = offline */
+.net-dot{
+  width:34px;height:34px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  border:1px solid transparent;cursor:default;
+}
+.net-dot.net-on{background:var(--okbg,#e2f5ea);color:var(--ok,#1a7a4f);border-color:rgba(26,122,79,.25)}
+.net-dot.net-off{background:#fff3e0;color:#b06a00;border-color:rgba(176,106,0,.3);animation:netOffPulse 2.2s ease-in-out infinite}
+[data-theme="dark"] .net-dot.net-on{background:rgba(64,180,120,.14);color:#5ad195;border-color:rgba(90,209,149,.3)}
+[data-theme="dark"] .net-dot.net-off{background:rgba(255,167,38,.14);color:#ffb74d;border-color:rgba(255,183,77,.35)}
+@keyframes netOffPulse{0%,100%{opacity:1}50%{opacity:.55}}
+@media(max-width:560px){ .net-dot{width:30px;height:30px} }
