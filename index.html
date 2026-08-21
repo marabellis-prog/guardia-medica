@@ -1314,6 +1314,30 @@
   </div>
 </div>
 
+<!-- Che cosa deve ancora partire da questo dispositivo -->
+<div class="mov" id="mcoda">
+  <div class="mbox" style="max-width:640px;width:min(94vw,640px);text-align:left">
+    <div class="mtit" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <span style="display:flex;align-items:center;gap:.5rem">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+        In attesa di partire
+      </span>
+      <button class="ibtn" id="btnCodaClose" type="button" title="Chiudi">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="mmsg" style="text-align:left;max-width:none">
+      Tutto quello che &egrave; al sicuro sul dispositivo e deve ancora raggiungere il server.
+      Parte da solo appena c&rsquo;&egrave; linea; puoi anche forzare un tentativo adesso.
+    </div>
+    <div id="codaElenco" class="coda-elenco"></div>
+    <div class="mac" style="margin-top:14px">
+      <button class="bcan" id="btnCodaChiudi2" type="button">Chiudi</button>
+      <button class="bconf" id="btnCodaInvia" type="button">Prova a inviare adesso</button>
+    </div>
+  </div>
+</div>
+
 <!-- Conferma eliminazione Modulo M -->
 <div class="mov" id="mmodmDel">
   <div class="mbox">
