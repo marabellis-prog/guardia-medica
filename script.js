@@ -3226,7 +3226,7 @@ function setupTableDelegation(){
     var modmBtn2=t.closest('.iho-modm');
     if(modmBtn2){ e.stopPropagation(); modmApri(idModulo(modmBtn2)); return; }
     var modmLink=t.closest('.modm-link');
-    if(modmLink){ e.stopPropagation(); modmApri(idModulo(modmLink)); return; }
+    if(modmLink){ e.stopPropagation(); modmApriOFile(idModulo(modmLink)); return; }
     var modmDel=t.closest('.modm-del');
     if(modmDel){ e.stopPropagation(); modmPromptDelete(idModulo(modmDel)); return; }
 
@@ -7564,6 +7564,43 @@ function modmPrecompila(callId){
   return d;
 }
 
+// Il modulo FIRMATO e un documento: si apre il PDF, come un allegato.
+// Da Drive se e gia salito; dalla cassaforte locale se aspetta la linea.
+// La bozza invece apre il foglio, per riprendere la compilazione.
+function modmApriOFile(callId){
+  var m=moduliMByCall[String(callId)];
+  if(!m || !m.firmato){ modmApri(callId); return; }
+
+  var nome=m.file_name || ('Modulo M - chiamata '+callId+'.pdf');
+  if(m.drive_file_id && !m.inCoda){
+    startAttachDownload(m.drive_file_id, nome);
+    return;
+  }
+
+  // Non ancora su Drive: la finestra si apre SUBITO (dentro il tocco,
+  // altrimenti il telefono la blocca) e si riempie col PDF di bordo.
+  var w=window.open('','_blank');
+  if(w){
+    try{ w.document.write('<!doctype html><meta charset="utf-8"><title>'+esc(nome)+'</title><body style="margin:0;display:flex;align-items:center;justify-content:center;height:100vh;font-family:system-ui,sans-serif;color:#666">Apertura di '+esc(nome)+'…</body>'); }catch(_){}
+  }
+  modmCodaLeggi().then(function(righe){
+    var rec=righe.filter(function(x){ return String(x.chiamata_id)===String(callId); })[0];
+    if(rec && rec.pdf){
+      var url=URL.createObjectURL(rec.pdf);
+      if(w) w.location.href=url; else window.open(url,'_blank');
+      setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_){} }, 120000);
+      return;
+    }
+    // Documento non ancora pronto da nessuna parte: si mostra il foglio
+    if(w){ try{ w.close(); }catch(_){} }
+    fb(false,'Documento non ancora pronto','Il PDF è in preparazione: intanto ti mostro il modulo compilato.');
+    modmApri(callId);
+  }).catch(function(){
+    if(w){ try{ w.close(); }catch(_){} }
+    modmApri(callId);
+  });
+}
+
 function modmApri(callId){
   // Se il foglio era stato prestato alla fotografia, lo si riprende subito:
   // senza questo la finestra si aprirebbe grigia e vuota.
@@ -8621,8 +8658,9 @@ function injectModmUi(){
           var firmato=!!salvato.firmato;
           var inCoda=!!salvato.inCoda;
           w.innerHTML='<span class="modm-link" data-row="'+id+'" title="'
-            +(inCoda?'Salvato sul dispositivo: partira appena torna la linea'
-                   :(firmato?'Apri il Modulo M firmato (sola lettura)':'Riprendi la compilazione del Modulo M'))+'">'
+            +(inCoda?(firmato?'Firmato e al sicuro sul dispositivo: tocca per vedere il PDF'
+                             :'Bozza al sicuro sul dispositivo: tocca per riprenderla')
+                   :(firmato?'Apri il PDF del Modulo M (per stamparlo o inviarlo)':'Riprendi la compilazione del Modulo M'))+'">'
             +svgModuloM()+'Visualizza modulo M</span>'
             +(inCoda?'<span class="modm-attesa">da inviare</span>':(firmato?'':'<span class="modm-bozza">bozza</span>'))
             +'<span class="modm-del" data-row="'+id+'" title="Elimina il Modulo M">'
