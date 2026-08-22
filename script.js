@@ -376,22 +376,41 @@ async function setupAuth(){
       // NON ricaricare: l'utente deve poter leggere il messaggio di errore.
       if(authRejectInProgress) return;
 
-      // Non l'hai chiesto tu: e la linea che manca. Si continua a lavorare
-      // col profilo di bordo, senza coprire nulla e senza ricaricare.
-      if(!uscitaVoluta && profiloOffline() && (!isOnline() || cosePendenti() || isUserBusy())){
-        currentUser = currentUser || profiloOffline();
+      // Non l'hai chiesto tu: e la linea che manca (o un singhiozzo della
+      // sessione). Chi e DENTRO resta dentro: basta l'identita in memoria
+      // oppure il profilo di bordo. E la si rimette subito su disco.
+      var identita = currentUser || profiloOffline();
+      if(!uscitaVoluta && identita && (!isOnline() || cosePendenti() || isUserBusy())){
+        currentUser = identita;
+        salvaProfiloOffline(identita);   // il disco si riallinea alla memoria
         avvioSenzaRete = true;
         try{ aggiornaIndicatoreRete(); mostraAvvisoOffline(); }catch(_){}
         return;
       }
 
-      currentUser = null;
       metti_al_sicuro_tutto();          // qualunque cosa succeda, prima si salva
+
+      // Senza linea NON si ricarica mai: si finirebbe su una schermata di
+      // accesso inservibile. Se un'identita c'e, si continua a lavorare.
+      if(!isOnline()){
+        if(identita){
+          currentUser = identita;
+          salvaProfiloOffline(identita);
+          avvioSenzaRete = true;
+          try{ aggiornaIndicatoreRete(); mostraAvvisoOffline(); }catch(_){}
+          return;
+        }
+        authShowOverlay();               // mai entrato su questo dispositivo
+        return;
+      }
+
+      currentUser = null;
       authShowOverlay();
       setTimeout(function(){ window.location.reload(); }, 400);
     } else if(event === 'TOKEN_REFRESHED' && session){
       // Aggiorna JWT su refresh per non perdere autenticazione
       currentJwt = session.access_token;
+      if(currentUser) salvaProfiloOffline(currentUser);
     }
   });
 
@@ -2024,7 +2043,19 @@ function salva(){
     } else {
       fb(true,'Salvata in locale','Connessione assente: la chiamata è al sicuro sul dispositivo e verrà inviata automaticamente appena torna la linea. Puoi anche chiudere l\'app: NON perderai i dati.');
     }
-    loadRows(1);
+    // La chiamata compare SUBITO in cima, senza aspettare il server: niente
+    // piu secondi di schermo vuoto su reti appena riagganciate.
+    try{
+      var tbS=document.getElementById('tbody');
+      var inCoda=syncLoadQueue().some(function(e){ return e.type==='insert' && e.client_uuid===clientUuid; });
+      if(inCoda && tbS && PAGE===1 && !currentFilters && !showIncompleteOnly
+         && !tbS.querySelector('tr[data-uuid="'+clientUuid+'"]')){
+        tbS.insertAdjacentHTML('afterbegin', renderPendingInsertRow(pendingInsertToRecord({client_uuid:clientUuid, body:body})));
+        try{ injectModmUi(); }catch(_){}
+      }
+    }catch(_){}
+    // E l'aggiornamento vero avviene in silenzio: l'elenco non sparisce mai
+    loadRows(1, {silenzioso:true});
   };
 
   // 3. Salva prima eventuali modifiche in sospeso su altre righe, poi tenta l'invio.
