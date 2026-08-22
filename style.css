@@ -1758,3 +1758,19 @@ html,body{overscroll-behavior-y:none}
 }
 .coda-del:hover{opacity:1;background:var(--erbg)}
 @media(hover:none){ .coda-del{opacity:1;width:36px;height:36px} }
+
+/* Icona tonda della coda, accanto al Wi-Fi: quante cose aspettano di partire */
+#codaDot{
+  position:relative;width:34px;height:34px;border-radius:50%;border:1px solid rgba(21,101,192,.3);
+  display:flex;align-items:center;justify-content:center;flex-shrink:0;cursor:pointer;
+  background:#e8eefc;color:#1565c0;padding:0;font-family:inherit;
+}
+#codaDot:hover{filter:brightness(1.05)}
+.codaDot-n{
+  position:absolute;top:-4px;right:-4px;min-width:16px;height:16px;padding:0 4px;
+  border-radius:999px;background:#1565c0;color:#fff;
+  font-size:.62rem;font-weight:800;line-height:16px;text-align:center;
+}
+[data-theme="dark"] #codaDot{background:rgba(100,181,246,.14);color:#64b5f6;border-color:rgba(100,181,246,.35)}
+[data-theme="dark"] .codaDot-n{background:#64b5f6;color:#0b1c3a}
+@media(max-width:560px){ #codaDot{width:30px;height:30px} }
