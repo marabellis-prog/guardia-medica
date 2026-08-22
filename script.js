@@ -1081,7 +1081,10 @@ function setupAutoRefresh(){
     if(ex)ex.remove();
     driveWarmup();
     ensureFreshToken().then(function(){
-      syncProcess(); // invia eventuali chiamate/modifiche accumulate offline
+      // Al risveglio (schermo riacceso, app tornata davanti) parte TUTTO
+      // quello che aspettava: chiamate, moduli, allegati, operazioni Drive.
+      // Le pause per i vecchi fallimenti si azzerano: la rete e cambiata.
+      drenaTuttoSubito(true);
       if(isUserBusy()){
         checkForRemoteChanges();
         return;
