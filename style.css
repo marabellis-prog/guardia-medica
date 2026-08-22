@@ -699,6 +699,7 @@ tbody tr.has-attachments td{padding-bottom:.35rem}
   font-weight:700;color:var(--txm);font-size:.82rem;white-space:nowrap;
   text-transform:uppercase;letter-spacing:.04em;
 }
+.attach-cell{vertical-align:top}
 .attach-list{display:flex;flex-wrap:wrap;gap:.35rem .7rem;align-items:center}
 .attach-item{
   display:inline-flex;align-items:center;gap:.25rem;
@@ -752,6 +753,7 @@ tbody tr.has-attachments td{padding-bottom:.35rem}
   .twrap tbody tr.attach-row.attach-pending{background:var(--pend)}
   .twrap tbody tr.attach-row.attach-done{background:var(--done);opacity:.8}
   .twrap tbody tr.attach-row td{display:block;padding:0;border:none;background:transparent}
+  .twrap tbody tr.attach-row td.attach-cell{display:block}
   /* La card chiamata con allegati non si arrotonda sotto: si fonde con la riga allegati */
   .twrap tbody tr.has-attachments{border-bottom-left-radius:0;border-bottom-right-radius:0;border-bottom:none}
   .attach-label{text-align:left;padding-right:0!important;margin-bottom:.35rem}
