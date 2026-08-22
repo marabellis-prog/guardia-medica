@@ -3669,8 +3669,9 @@ function confDelete(){
   var accAltra=document.querySelector('tr.attach-row[data-for="'+ri+'"]');
   if(accAltra) accAltra.style.display='none';
 
-  // I file su Drive seguono la chiamata nel cestino (e tornano col ripristino)
-  drivePerChiamata('trash', ri);
+  // I file su Drive NON si toccano: il cestino e una sospensione, non una
+  // cancellazione. Se la chiamata torna, deve ritrovare tutto com'era.
+  // L'eliminazione dei file avviene SOLO alla cancellazione definitiva.
 
   // Aggiorna conteggio nell'info bar al volo
   var li=els.linfo||document.getElementById('linfo');
@@ -6700,13 +6701,14 @@ function cestinaSuDriveAuto(fileId){
 }
 // Esegue una singola annotazione: trova i file della chiamata e li sposta
 function driveOpsEsegui(e){
+  // «cestina» non si usa piu: il cestino non tocca i file. Le annotazioni
+  // rimaste dal comportamento precedente si scaricano senza fare nulla.
+  if(e.op!=='untrash') return Promise.resolve(true);
   return fileDiChiamata(e.chiamata).then(function(ids){
     if(!ids.length) return true;
     var catena=Promise.resolve();
     ids.forEach(function(id){
-      catena=catena.then(function(){
-        return (e.op==='untrash' ? ripristinaSuDrive(id) : cestinaSuDriveAuto(id));
-      });
+      catena=catena.then(function(){ return ripristinaSuDrive(id); });
     });
     return catena.then(function(){ return true; });
   });
