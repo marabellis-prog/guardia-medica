@@ -2873,16 +2873,23 @@ function disegnaElencoCoda(){
       righe.push(voceCoda('modifica','Modifica alla chiamata '+e.id,
         Object.keys(e.body||{}).join(', ')||'\u2014', 'upd:'+e.id));
     });
+    function conMotivo(dove, rec){
+      if(rec && rec.ultimoErrore){
+        var perche=spiegaErrore(rec.ultimoErrore);
+        return dove+' \u2014 ultimo tentativo fallito: '+perche;
+      }
+      return dove;
+    }
     moduli.forEach(function(m){
       var dove=String(m.chiamata_id).indexOf('local_')===0 ? 'chiamata non ancora registrata' : ('chiamata '+m.chiamata_id);
       var titolo = m.soloDocumento
         ? 'Modulo M \u2014 gi\u00e0 salvato, manca il documento'
         : ('Modulo M ('+(m.firmato?'firmato':'bozza')+')');
-      righe.push(voceCoda('modulo', titolo, dove, 'modm:'+m.chiamata_id));
+      righe.push(voceCoda('modulo', titolo, conMotivo(dove, m), 'modm:'+m.chiamata_id));
     });
     alleg.forEach(function(a){
       var dove=String(a.chiamata_id).indexOf('local_')===0 ? 'chiamata non ancora registrata' : ('chiamata '+a.chiamata_id);
-      righe.push(voceCoda('allegato', a.nome||'allegato', dove, 'all:'+a.id));
+      righe.push(voceCoda('allegato', a.nome||'allegato', conMotivo(dove, a), 'all:'+a.id));
     });
 
     if(!righe.length){
@@ -2893,6 +2900,19 @@ function disegnaElencoCoda(){
   }).catch(function(){
     box.innerHTML='<div class="coda-vuota">Non riesco a leggere la memoria del dispositivo.</div>';
   });
+}
+// Traduce il codice d'errore in una spiegazione leggibile
+function spiegaErrore(codice){
+  var c=String(codice||'');
+  if(c.indexOf('drive_lenta')!==-1) return 'Drive non ha risposto in tempo (rete lenta)';
+  if(c.indexOf('pdf_lento')!==-1 || c.indexOf('pdf_')===0) return 'produzione del documento non riuscita';
+  if(c.indexOf('script_')===0) return 'librerie del documento non scaricabili';
+  if(c.indexOf('no_token')!==-1 || c.indexOf('popup')!==-1 || c.indexOf('401')!==-1) return 'serve l\u2019autorizzazione Google (tocca l\u2019avviso blu)';
+  if(c.indexOf('upload_403')!==-1) return 'Google Drive ha negato il permesso';
+  if(c.indexOf('upload_')===0) return 'caricamento rifiutato da Drive ('+c.replace('upload_','')+')';
+  if(c.indexOf('db_')===0) return 'il server ha rifiutato la registrazione ('+c.replace('db_','')+')';
+  if(c.indexOf('offline')!==-1 || c.indexOf('Failed to fetch')!==-1) return 'rete assente al momento del tentativo';
+  return c || 'motivo sconosciuto';
 }
 function voceCoda(tipo, titolo, sotto, chiave){
   var icone={
@@ -6232,11 +6252,24 @@ function clearDriveToken(){
 
 function driveFetch(url,opts){
   opts=opts||{};
+  // Limite di tempo: senza, un caricamento su rete impuntata restava appeso
+  // per sempre, il cartello «Invio in corso» non spariva piu e i tentativi
+  // successivi restavano sbarrati dal lucchetto del drenaggio.
+  var tempoMax=opts.tempoMax || 45000;
   var doIt=function(token){
     var headers={};
     if(opts.headers){ for(var k in opts.headers){ if(opts.headers.hasOwnProperty(k)) headers[k]=opts.headers[k]; } }
     headers['Authorization']='Bearer '+token;
-    return fetch(url,{method:opts.method||'GET',headers:headers,body:opts.body});
+    var taglio=(typeof AbortController!=='undefined') ? new AbortController() : null;
+    var sveglia=taglio ? setTimeout(function(){ try{ taglio.abort(); }catch(_){} }, tempoMax) : null;
+    return fetch(url,{method:opts.method||'GET',headers:headers,body:opts.body,
+                      signal: taglio?taglio.signal:undefined})
+      .then(function(r){ if(sveglia) clearTimeout(sveglia); return r; },
+            function(e){
+              if(sveglia) clearTimeout(sveglia);
+              if(e && e.name==='AbortError') throw new Error('drive_lenta');
+              throw e;
+            });
   };
   // Se chi chiama sta lavorando di sfondo, nessuna finestra: al massimo
   // l'operazione fallisce e si riprova al giro dopo.
@@ -6299,7 +6332,8 @@ function driveUpload(file){
       '\r\n--'+boundary+'--'
     ], {type:'multipart/related; boundary='+boundary});
     return driveFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,size',{
-      method:'POST', headers:{'Content-Type':'multipart/related; boundary='+boundary}, body:body
+      method:'POST', headers:{'Content-Type':'multipart/related; boundary='+boundary}, body:body,
+      tempoMax:120000        // un documento grosso su rete lenta merita piu respiro
     }).then(function(r){ if(!r.ok) throw new Error('upload_'+r.status); return r.json(); });
   });
 }
@@ -6441,6 +6475,7 @@ function allegCodaDrena(){
 function allegSegnaFallimento(rec, err){
   rec.tentativi=(rec.tentativi||0)+1;
   rec.dopo=Date.now()+prossimaPausa(rec.tentativi);
+  rec.ultimoErrore=String((err&&err.message)||err||'').slice(0,90);
   if(erroreDiAutorizzazione(err)){
     rec.dopo=Date.now()+5*60000;      // senza permesso ritentare non serve
     try{ driveMostraInvito(); }catch(_){}
@@ -8292,12 +8327,35 @@ function modmInvia(rec){
     // Resta in coda, ma con una pausa che cresce: niente martellamento
     rec.tentativi=(rec.tentativi||0)+1;
     rec.dopo=Date.now()+prossimaPausa(rec.tentativi);
+    rec.ultimoErrore=String((err&&err.message)||err||'').slice(0,90);
     if(erroreDiAutorizzazione(err)){
       rec.dopo=Date.now()+5*60000;
       try{ driveMostraInvito(); }catch(_){}
     }
     return modmCodaScrivi(rec).catch(function(){}).then(function(){ return false; });
   });
+}
+
+// Prepara il documento del modulo appena salvato e lo mette in cassaforte
+// accanto ai dati. A cose fatte, se c'e linea, fa partire l'invio.
+function modmPreparaDocumento(callId){
+  return modmCodaLeggi().then(function(righe){
+    var rec=righe.filter(function(x){ return String(x.chiamata_id)===String(callId); })[0];
+    if(!rec || !rec.firmato || rec.pdf) return false;    // niente da fare
+    return modmRigeneraPdf(rec).then(function(blob){
+      if(!blob){
+        // Documento non riuscito: i DATI partono lo stesso, subito
+        if(isOnline()) setTimeout(function(){ try{ modmCodaDrena(); }catch(_){} }, 100);
+        return false;
+      }
+      rec.pdf=blob;
+      rec.dopo=0; rec.tentativi=0;
+      return modmCodaScrivi(rec).then(function(){
+        if(isOnline()) setTimeout(function(){ try{ modmCodaDrena(); }catch(_){} }, 100);
+        return true;
+      });
+    });
+  }).catch(function(){ return false; });
 }
 
 // Se il PDF non era stato generato (librerie non disponibili in campagna),
@@ -8415,19 +8473,24 @@ function modmSalva(poiChiudi){
     injectModmUi();
 
     var chiamataLocale=String(callId).indexOf('local_')===0;
+
+    // Il DOCUMENTO si prepara ADESSO, in sottofondo, col foglio ancora caldo:
+    // finisce in cassaforte accanto a dati e firma. All'invio restera solo il
+    // caricamento. Funziona anche senza linea (le librerie sono in cache).
+    if(conFirma) setTimeout(function(){ try{ modmPreparaDocumento(callId); }catch(_){} }, 300);
+
     if(!isOnline()){
       fb(true, conFirma ? 'Modulo M firmato e al sicuro' : 'Bozza salvata sul dispositivo',
-         (conFirma ? 'Firma e dati sono salvi qui. ' : 'Resta modificabile. ')
+         (conFirma ? 'Firma, dati e documento sono salvi qui. ' : 'Resta modificabile. ')
          +(chiamataLocale ? 'Partir\u00e0 insieme alla chiamata, appena questa viene registrata.'
                           : 'Partir\u00e0 da solo appena torna la linea.'));
       return true;
     }
 
-    // ── POI, senza far aspettare nessuno: documento e invio ──
     fb(true, conFirma ? 'Modulo M firmato' : 'Bozza salvata',
        conFirma ? 'Al sicuro sul dispositivo. Preparo il documento e lo carico su Google Drive\u2026'
                 : 'Resta modificabile finch\u00e9 non apporrai la firma dell\u2019assistito.');
-    setTimeout(function(){ try{ modmCodaDrena(); }catch(_){} }, 150);
+    if(!conFirma) setTimeout(function(){ try{ modmCodaDrena(); }catch(_){} }, 150);
     return true;
   }).catch(function(e){
     setModalBusy('mmodm', false);
