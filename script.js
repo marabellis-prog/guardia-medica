@@ -6863,7 +6863,7 @@ function injectAttachRows(){
     ar.setAttribute('data-for',cid);
     ar.innerHTML=
       '<td colspan="3" class="attach-label">Allegati:</td>'
-     +'<td colspan="2" class="attach-list">'+list.map(attachItemHtml).join('')+'</td>';
+     +'<td colspan="2" class="attach-cell"><div class="attach-list">'+list.map(attachItemHtml).join('')+'</div></td>';
     row.classList.add('has-attachments'); // toglie il bordo inferiore → si fonde con la riga allegati
     if(row.nextSibling) row.parentNode.insertBefore(ar,row.nextSibling);
     else row.parentNode.appendChild(ar);
@@ -7589,6 +7589,19 @@ function modmApriOFile(callId){
       var url=URL.createObjectURL(rec.pdf);
       if(w) w.location.href=url; else window.open(url,'_blank');
       setTimeout(function(){ try{ URL.revokeObjectURL(url); }catch(_){} }, 120000);
+      return;
+    }
+    // Il documento e gia salito su Drive ma il collegamento non e ancora
+    // registrato: si apre da li, riempiendo la finestra gia aperta
+    if(rec && rec.drive_file_id && isOnline()){
+      driveGetBlob(rec.drive_file_id).then(function(blob){
+        var url2=URL.createObjectURL(blob);
+        if(w) w.location.href=url2; else window.open(url2,'_blank');
+        setTimeout(function(){ try{ URL.revokeObjectURL(url2); }catch(_){} }, 120000);
+      }).catch(function(){
+        if(w){ try{ w.close(); }catch(_){} }
+        modmApri(callId);
+      });
       return;
     }
     // Documento non ancora pronto da nessuna parte: si mostra il foglio
