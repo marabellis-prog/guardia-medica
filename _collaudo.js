@@ -158,6 +158,12 @@ function installa(){
         return risposta([], 204);
       }
       // GET
+      var min1 = path.match(/id=in\.\(([^)]*)\)/);
+      if(min1){
+        var idsF = min1[1].split(',');
+        return risposta(S.db.chiamate.filter(function(c){ return idsF.indexOf(String(c.id)) !== -1; })
+          .map(function(c){ return { id:c.id }; }));
+      }
       var mu = path.match(/client_uuid=eq\.([^&]+)/);
       if(mu){
         var u = decodeURIComponent(mu[1]);
