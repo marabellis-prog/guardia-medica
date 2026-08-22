@@ -2017,6 +2017,18 @@ function salva(){
   // 1. Scrivi SUBITO in coda locale (localStorage, durabile). Da questo
   //    momento la chiamata NON si perde più: sopravvive a chiusura/ricarica.
   var persisted=syncEnqueueInsert(clientUuid, body);
+  if(persisted){
+    // La chiamata compare SUBITO in cima, prima di qualunque tentativo di
+    // rete: il riscontro e immediato anche su una linea appena riagganciata.
+    try{
+      var tbS=document.getElementById('tbody');
+      if(tbS && PAGE===1 && !currentFilters && !showIncompleteOnly
+         && !tbS.querySelector('tr[data-uuid="'+clientUuid+'"]')){
+        tbS.insertAdjacentHTML('afterbegin', renderPendingInsertRow(pendingInsertToRecord({client_uuid:clientUuid, body:body})));
+        try{ injectModmUi(); }catch(_){}
+      }
+    }catch(_){}
+  }
   if(!persisted){
     // localStorage non disponibile (modalità privata/incognito o memoria piena):
     // NON pulire il form, così i dati restano visibili e recuperabili a mano.
@@ -2043,18 +2055,8 @@ function salva(){
     } else {
       fb(true,'Salvata in locale','Connessione assente: la chiamata è al sicuro sul dispositivo e verrà inviata automaticamente appena torna la linea. Puoi anche chiudere l\'app: NON perderai i dati.');
     }
-    // La chiamata compare SUBITO in cima, senza aspettare il server: niente
-    // piu secondi di schermo vuoto su reti appena riagganciate.
-    try{
-      var tbS=document.getElementById('tbody');
-      var inCoda=syncLoadQueue().some(function(e){ return e.type==='insert' && e.client_uuid===clientUuid; });
-      if(inCoda && tbS && PAGE===1 && !currentFilters && !showIncompleteOnly
-         && !tbS.querySelector('tr[data-uuid="'+clientUuid+'"]')){
-        tbS.insertAdjacentHTML('afterbegin', renderPendingInsertRow(pendingInsertToRecord({client_uuid:clientUuid, body:body})));
-        try{ injectModmUi(); }catch(_){}
-      }
-    }catch(_){}
-    // E l'aggiornamento vero avviene in silenzio: l'elenco non sparisce mai
+    // L'aggiornamento avviene in silenzio: l'elenco non sparisce mai
+    // (la riga della chiamata e gia in cima dal momento del salvataggio)
     loadRows(1, {silenzioso:true});
   };
 
