@@ -540,7 +540,41 @@ function creaIndicatoreRete(){
   var d=document.createElement('div');
   d.id='netDot';
   menu.parentNode.insertBefore(d, menu);
+  // Accanto: la coda delle cose in attesa, sempre a portata di tocco
+  var c=document.createElement('button');
+  c.id='codaDot';
+  c.type='button';
+  c.title='Cose in attesa di partire: tocca per vederle';
+  c.style.display='none';
+  c.addEventListener('click', function(){ apriElencoCoda(); });
+  menu.parentNode.insertBefore(c, d);
   aggiornaIndicatoreRete();
+  try{ aggiornaIndicatoreCoda(); }catch(_){}
+}
+
+// Quante cose aspettano di partire da questo dispositivo
+function contaCoseInCoda(){
+  var q=[];
+  try{ q=syncLoadQueue(); }catch(_){}
+  var tot=q.length;
+  try{
+    Object.keys(moduliMLocali||{}).forEach(function(k){
+      if(!(moduliMLocali[k]||{}).soloDocumento) tot++;
+    });
+  }catch(_){}
+  try{
+    Object.keys(allegatiLocali||{}).forEach(function(k){ tot+=(allegatiLocali[k]||[]).length; });
+  }catch(_){}
+  return tot;
+}
+function aggiornaIndicatoreCoda(){
+  var c=document.getElementById('codaDot');
+  if(!c) return;
+  var tot=contaCoseInCoda();
+  if(tot<=0){ c.style.display='none'; return; }
+  c.style.display='';
+  c.innerHTML='<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>'
+    +'<span class="codaDot-n">'+(tot>9?'9+':tot)+'</span>';
 }
 function aggiornaIndicatoreRete(){
   var d=document.getElementById('netDot');
@@ -2764,6 +2798,7 @@ function fineInvio(){
 function plur(n, uno, molti){ return n+' '+(n===1?uno:molti); }
 
 function syncRenderBadge(){
+  try{ aggiornaIndicatoreCoda(); }catch(_){}
   var q=syncLoadQueue();
   var inserts=q.filter(function(e){return e.type==='insert';}).length;
   var updates=q.length-inserts;
@@ -6358,7 +6393,7 @@ function allegCodaDrena(){
   if(!isOnline() || !currentUser) return Promise.resolve();
   _allegDrenaggio=true;
   var forza=arguments.length>0 && arguments[0]===true;
-  return inSfondoDrive(risolviEtichetteProvvisorie().then(allegCodaLeggi).then(function(righe){
+  return inSfondoDrive(risolviEtichetteProvvisorie().then(spazzaFantasmi).then(allegCodaLeggi).then(function(righe){
     var adesso=Date.now();
     var utili=righe.filter(function(r){
       if(String(r.chiamata_id).indexOf('local_')===0) return false;
@@ -8085,6 +8120,70 @@ function risolviEtichetteProvvisorie(){
   }).catch(function(){ return false; });
 }
 
+// Le chiamate di questi numeri esistono ancora sul server?
+// Risponde con un dizionario {id: true} SOLO se il server ha dato una
+// risposta certa; con null se non si e potuto verificare (niente pulizie
+// azzardate su risposte dubbie).
+function chiamateEsistenti(ids){
+  ids=(ids||[]).filter(function(x){ return /^\d+$/.test(String(x)); });
+  if(!ids.length) return Promise.resolve({});
+  return sbFetch('chiamate?id=in.('+ids.join(',')+')&select=id')
+    .then(function(r){ return r.json(); })
+    .then(function(righe){
+      if(!Array.isArray(righe)) return null;      // risposta non certa
+      var vive={};
+      righe.forEach(function(c){ vive[String(c.id)]=true; });
+      return vive;
+    })
+    .catch(function(){ return null; });
+}
+
+// Spazza dalla coda moduli e allegati rimasti agganciati a chiamate MORTE.
+// Il PDF eventualmente gia salito su Drive per il fantasma viene rimosso.
+function spazzaFantasmi(){
+  if(!isOnline()) return Promise.resolve(false);
+  return Promise.all([modmCodaLeggi(), allegCodaLeggi()]).then(function(r){
+    var numerici={};
+    r[0].forEach(function(x){ if(/^\d+$/.test(String(x.chiamata_id))) numerici[x.chiamata_id]=1; });
+    r[1].forEach(function(x){ if(/^\d+$/.test(String(x.chiamata_id))) numerici[x.chiamata_id]=1; });
+    var ids=Object.keys(numerici);
+    if(!ids.length) return false;
+    return chiamateEsistenti(ids).then(function(vive){
+      if(vive===null) return false;               // niente certezze, niente pulizie
+      var pulizie=[], toccato=false;
+      r[0].forEach(function(m){
+        var k=String(m.chiamata_id);
+        if(/^\d+$/.test(k) && !vive[k]){
+          toccato=true;
+          traceFantasma('Modulo M', k);
+          if(m.drive_file_id) pulizie.push(driveDelete(m.drive_file_id).catch(function(){}));
+          pulizie.push(modmCodaCancella(m.chiamata_id));
+          delete moduliMLocali[k]; delete moduliMByCall[k];
+        }
+      });
+      r[1].forEach(function(a){
+        var k=String(a.chiamata_id);
+        if(/^\d+$/.test(k) && !vive[k]){
+          toccato=true;
+          traceFantasma('allegato '+(a.nome||''), k);
+          if(a.drive_file_id) pulizie.push(driveDelete(a.drive_file_id).catch(function(){}));
+          pulizie.push(allegCodaCancella(a.id));
+        }
+      });
+      if(!toccato) return false;
+      return Promise.all(pulizie).then(function(){
+        return Promise.all([modmCaricaCodaInMappa(), allegCaricaCodaInMappa()]);
+      }).then(function(){
+        try{ syncRenderBadge(); injectModmUi(); injectAttachRows(); }catch(_){}
+        return true;
+      });
+    });
+  }).catch(function(){ return false; });
+}
+function traceFantasma(cosa, id){
+  try{ console.info('[coda] '+cosa+' della chiamata '+id+' rimosso: la chiamata non esiste piu sul server'); }catch(_){}
+}
+
 var _modmDrenaggio=false;
 var _modmDaRifare=false;
 function modmCodaDrena(){
@@ -8092,7 +8191,7 @@ function modmCodaDrena(){
   if(!isOnline() || !currentUser) return Promise.resolve();
   _modmDrenaggio=true;
   var forza=arguments.length>0 && arguments[0]===true;
-  return inSfondoDrive(risolviEtichetteProvvisorie().then(modmCodaLeggi).then(function(righeTutte){
+  return inSfondoDrive(risolviEtichetteProvvisorie().then(spazzaFantasmi).then(modmCodaLeggi).then(function(righeTutte){
     var adesso=Date.now();
     var righe=righeTutte.filter(function(r){ return forza || !r.dopo || r.dopo<=adesso; });
     // Coda vuota: si esce SENZA interrogare il database (niente traffico sprecato)
