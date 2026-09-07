@@ -1,49 +1,82 @@
-name: Supabase Keep-Alive
+name: Keepalive
 
+# Tiene attivo il progetto Supabase free. Storia (24/08/2026): i keepalive in
+# sola LETTURA (GET tabella o RPC read-only) NON alimentano il contatore di
+# attivita' di Supabase: i run erano verdi ma il progetto andava in pausa lo
+# stesso. Standard v3, l'unico dimostrato robusto:
+#   1. controlla lo stato via Management API; se in pausa fa RESTORE da solo
+#      (anche nel caso peggiore il fermo massimo e' ~24h)
+#   2. heartbeat di SCRITTURA vera sul DB (update keepalive.updated_at)
+#   3. verifica end-to-end: RPC ping() via REST anon, che a sua volta SCRIVE
+#      (hard-fail: se fallisce il run e' rosso e arriva l'email di GitHub)
+#   4. commit vuoto se il repo e' fermo da 45+ gg (GitHub spegne i cron a 60)
 on:
   schedule:
-    - cron: '0 8 */3 * *'   # ogni 3 giorni alle 08:00 UTC (margine ampio sotto i 7gg di pausa Supabase)
-  workflow_dispatch:          # consente avvio manuale dal pannello GitHub
+    - cron: '17 4 * * *'   # ogni giorno
+  workflow_dispatch:
 
 permissions:
-  contents: write             # necessario per l'heartbeat commit (evita auto-disable a 60gg)
+  contents: write
 
 jobs:
-  ping:
+  keepalive:
     runs-on: ubuntu-latest
     steps:
+      - name: Stato progetto + auto-restore se in pausa
+        env:
+          MGMT: ${{ secrets.SUPABASE_MGMT_TOKEN }}
+        run: |
+          REF=lrvkchqvjzynfzevpqaj
+          status=$(curl -sS -H "Authorization: Bearer $MGMT" "https://api.supabase.com/v1/projects/$REF" | sed -nE 's/.*"status":"([^"]*)".*/\1/p')
+          echo "Stato: $status"
+          if [ "$status" != "ACTIVE_HEALTHY" ]; then
+            echo "Progetto non attivo -> restore..."
+            curl -sS -X POST -H "Authorization: Bearer $MGMT" -H "Content-Type: application/json" -d '{}' \
+              -o /dev/null -w "restore HTTP %{http_code}\n" "https://api.supabase.com/v1/projects/$REF/restore"
+            for i in $(seq 1 30); do
+              sleep 10
+              status=$(curl -sS -H "Authorization: Bearer $MGMT" "https://api.supabase.com/v1/projects/$REF" | sed -nE 's/.*"status":"([^"]*)".*/\1/p')
+              echo "  attesa $i: $status"
+              [ "$status" = "ACTIVE_HEALTHY" ] && break
+            done
+          fi
+          test "$status" = "ACTIVE_HEALTHY"
+
+      - name: Heartbeat SQL (scrittura vera sul DB)
+        env:
+          MGMT: ${{ secrets.SUPABASE_MGMT_TOKEN }}
+        run: |
+          REF=lrvkchqvjzynfzevpqaj
+          out=$(curl -sS -X POST "https://api.supabase.com/v1/projects/$REF/database/query" \
+            -H "Authorization: Bearer $MGMT" -H "Content-Type: application/json" \
+            -d '{"query":"update public.keepalive set updated_at = now() where id = 1 returning updated_at;"}')
+          echo "Heartbeat: $out"
+          echo "$out" | grep -q "updated_at"
+
+      - name: Verifica end-to-end (RPC ping via REST anon, scrive anche lei)
+        run: |
+          ANON="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxydmtjaHF2anp5bmZ6ZXZwcWFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NDY5NjksImV4cCI6MjA5MzIyMjk2OX0.XZXyUt9UNepHvr4HBLgCkywQYsXwtmvwYCsRrlAMBv4"
+          code=$(curl -sS -o /tmp/r -w "%{http_code}" -X POST \
+            "https://lrvkchqvjzynfzevpqaj.supabase.co/rest/v1/rpc/ping" \
+            -H "apikey: $ANON" -H "Authorization: Bearer $ANON" \
+            -H "Content-Type: application/json" -d '{}')
+          echo "RPC ping -> HTTP $code"; cat /tmp/r 2>/dev/null; echo
+          test "$code" = "200"
+
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Ping Supabase (tiene sveglio il progetto)
+      - name: Rinnova il repo se fermo da 45+ giorni (anti-disable cron)
         run: |
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
-            -H "apikey: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxydmtjaHF2anp5bmZ6ZXZwcWFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NDY5NjksImV4cCI6MjA5MzIyMjk2OX0.XZXyUt9UNepHvr4HBLgCkywQYsXwtmvwYCsRrlAMBv4" \
-            -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxydmtjaHF2anp5bmZ6ZXZwcWFqIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzc2NDY5NjksImV4cCI6MjA5MzIyMjk2OX0.XZXyUt9UNepHvr4HBLgCkywQYsXwtmvwYCsRrlAMBv4" \
-            "https://lrvkchqvjzynfzevpqaj.supabase.co/rest/v1/app_version?select=id&limit=1")
-          echo "Supabase risposta HTTP: $STATUS"
-          if [ "$STATUS" = "200" ]; then
-            echo "✅ Progetto attivo"
-          else
-            echo "⚠️ Risposta inattesa: $STATUS"
-            exit 1
-          fi
-
-      - name: Heartbeat commit se repo inattivo (evita auto-disable dei workflow a 60gg)
-        run: |
-          LAST=$(git log -1 --format=%ct)
-          NOW=$(date +%s)
-          DAYS=$(( (NOW - LAST) / 86400 ))
-          echo "Giorni dall'ultimo commit sul branch: $DAYS"
-          if [ "$DAYS" -ge 45 ]; then
-            echo "Repo vicino alla soglia di auto-disable (60gg): eseguo heartbeat commit"
-            mkdir -p .github
-            date -u +"%Y-%m-%dT%H:%M:%SZ" > .github/last-keepalive.txt
-            git config user.name "keepalive-bot"
-            git config user.email "github-actions[bot]@users.noreply.github.com"
-            git add .github/last-keepalive.txt
-            git commit -m "chore: keepalive heartbeat [skip ci]"
+          DIFF=$(( ( $(date +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Giorni dall'ultimo commit: $DIFF"
+          if [ "$DIFF" -ge 45 ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git commit --allow-empty -m "chore: keepalive heartbeat [skip ci]"
             git push
           else
-            echo "Repo attivo di recente: nessun heartbeat necessario"
+            echo "Nessun rinnovo necessario"
           fi
