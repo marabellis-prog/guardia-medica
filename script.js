@@ -256,6 +256,7 @@ function avvioOffline(){
   avvioSenzaRete=true;
   currentUser=p; currentJwt=null;
   authHideOverlay();
+  try{ hideLoader(); }catch(_){}
   renderUserMenu();
   if(currentUser.role==='admin') renderAdminBadge();
   loadPost();
@@ -442,7 +443,10 @@ function riLoginConHint(){
 }
 
 async function setupAuth(){
-  authShowOverlay(); // mostra subito login screen
+  // La schermata di accesso si mostra subito SOLO se questo dispositivo non
+  // conosce nessuno: chi ha gia il profilo di bordo resta sul velo di
+  // caricamento ed entra direttamente, qualunque sia l'esito della sessione.
+  if(!profiloOffline()) authShowOverlay();
   var client;
   try {
     client = await getSupabaseClient();
