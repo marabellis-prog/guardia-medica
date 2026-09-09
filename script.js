@@ -263,7 +263,8 @@ function avvioOffline(){
   setupVersionWatcher();
   restoreDraft();
   syncRenderBadge();
-  mostraAvvisoOffline();
+  try{ aggiornaIndicatoreRete(); }catch(_){}
+  if(!isOnline()) mostraAvvisoOffline();
   modmCaricaCodaInMappa();
   allegCaricaCodaInMappa();
   return true;
@@ -286,7 +287,7 @@ function riaggancioRete(){
   rimuoviAvvisoOffline();
   if(!currentUser) return;
   ensureFreshToken().then(function(ok){
-    if(!ok) return;              // sessione non recuperabile: al riavvio si rifara il login
+    if(!ok){ riparaSessione('riaggancio'); return; }   // si risana da sola (o invito blu)
     avvioSenzaRete=false;
     aggiornaIndicatoreRete();
     syncProcess();
@@ -357,6 +358,89 @@ if(typeof window!=='undefined'){
   });
 }
 
+// ── Riparazione silenziosa della sessione ───────────────────────────
+// La sessione puo morire per mille motivi (telefono a lungo bloccato, un
+// servizio che ha singhiozzato, un rinnovo andato storto). Chi lavora non
+// deve accorgersene: si prova a risanarla in sottofondo; solo se il gettone
+// e irrecuperabile serve un tocco (Google esige un gesto) e compare
+// l'invito blu. L'app intanto resta aperta e usabile.
+var _riparaInCorso=false, _riparaUltimo=0;
+function riparaSessione(motivo){
+  if(_riparaInCorso) return Promise.resolve(false);
+  if(Date.now()-_riparaUltimo<15000) return Promise.resolve(false);
+  _riparaInCorso=true; _riparaUltimo=Date.now();
+  return getSupabaseClient().then(function(client){
+    return client.auth.getSession().then(function(r){
+      var se=r&&r.data&&r.data.session;
+      if(se&&se.access_token) return se;
+      return client.auth.refreshSession().then(function(r2){
+        return r2&&r2.data&&r2.data.session;
+      }).catch(function(){ return null; });
+    });
+  }).then(function(se){
+    _riparaInCorso=false;
+    if(se&&se.access_token){
+      currentJwt=se.access_token;
+      rimuoviInvitoRiaggancio();
+      try{ cassaforteRidalleUnaChance(); }catch(_){}
+      promuoviAOnline();
+      return true;
+    }
+    // Niente sessione risanabile. Prima di disturbare: la rete c'e davvero?
+    return pingRete().then(function(viva){
+      if(viva) mostraInvitoRiaggancio();
+      return false;
+    });
+  }).catch(function(){ _riparaInCorso=false; return false; });
+}
+
+// Dalla modalita taccuino alla piena linea, senza mai ricaricare la pagina
+var _girateAvviate=false;
+function promuoviAOnline(){
+  avvioSenzaRete=false;
+  try{ aggiornaIndicatoreRete(); }catch(_){}
+  rimuoviAvvisoOffline();
+  drenaTuttoSubito(true);
+  try{ safeReloadRows(); }catch(_){}
+  try{ driveWarmup(true); }catch(_){}
+  if(!_girateAvviate){ _girateAvviate=true; try{ setupGirate(); }catch(_){} }
+}
+
+function mostraInvitoRiaggancio(){
+  if(document.getElementById('riaggancioBanner')) return;
+  if(document.body.classList.contains('auth-pending')) return;  // c'e gia la schermata di accesso
+  var b=document.createElement('div');
+  b.id='riaggancioBanner';
+  b.className='drive-banner';
+  b.setAttribute('role','button');
+  b.innerHTML='<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>'
+    +'<span><b>Riaggancia l\u2019account Google</b> &mdash; tocca qui: un attimo e riparte tutto (i tuoi dati sono al sicuro)</span>';
+  b.addEventListener('click', function(){
+    if(b.classList.contains('busy')) return;
+    b.classList.add('busy');
+    riLoginConHint();
+  });
+  document.body.appendChild(b);
+}
+function rimuoviInvitoRiaggancio(){
+  var b=document.getElementById('riaggancioBanner');
+  if(b) b.remove();
+}
+// Rientro con l'account di prima: login_hint dice a Google QUALE account,
+// cosi salta la schermata «Scegli un account».
+function riLoginConHint(){
+  metti_al_sicuro_tutto();
+  var pf=currentUser||profiloOffline();
+  getSupabaseClient().then(function(client){
+    var opts={provider:'google', options:{redirectTo:window.location.origin+window.location.pathname}};
+    if(pf&&pf.email) opts.options.queryParams={login_hint:pf.email};
+    return client.auth.signInWithOAuth(opts);
+  }).catch(function(){
+    var b=document.getElementById('riaggancioBanner');
+    if(b) b.classList.remove('busy');
+  });
+}
+
 async function setupAuth(){
   authShowOverlay(); // mostra subito login screen
   var client;
@@ -376,37 +460,31 @@ async function setupAuth(){
       // NON ricaricare: l'utente deve poter leggere il messaggio di errore.
       if(authRejectInProgress) return;
 
-      // Non l'hai chiesto tu: e la linea che manca (o un singhiozzo della
-      // sessione). Chi e DENTRO resta dentro: basta l'identita in memoria
-      // oppure il profilo di bordo. E la si rimette subito su disco.
+      // «Esci» premuto davvero: si esce pulito, come sempre.
+      if(uscitaVoluta){
+        currentUser = null;
+        authShowOverlay();
+        setTimeout(function(){ window.location.reload(); }, 400);
+        return;
+      }
+
+      // Non l'hai chiesto tu: e un singhiozzo (linea che manca, servizio
+      // momentaneamente giu, gettone scaduto male). Chi e DENTRO resta
+      // dentro, SEMPRE: basta l'identita in memoria o il profilo di bordo.
+      // Niente ricaricamenti, niente schermate di accesso: la sessione si
+      // ripara in sottofondo e al massimo compare l'invito blu.
       var identita = currentUser || profiloOffline();
-      if(!uscitaVoluta && identita && (!isOnline() || cosePendenti() || isUserBusy())){
+      if(identita){
         currentUser = identita;
         salvaProfiloOffline(identita);   // il disco si riallinea alla memoria
         avvioSenzaRete = true;
-        try{ aggiornaIndicatoreRete(); mostraAvvisoOffline(); }catch(_){}
+        try{ aggiornaIndicatoreRete(); if(!isOnline()) mostraAvvisoOffline(); }catch(_){}
+        if(isOnline()) riparaSessione('signed_out');
         return;
       }
 
       metti_al_sicuro_tutto();          // qualunque cosa succeda, prima si salva
-
-      // Senza linea NON si ricarica mai: si finirebbe su una schermata di
-      // accesso inservibile. Se un'identita c'e, si continua a lavorare.
-      if(!isOnline()){
-        if(identita){
-          currentUser = identita;
-          salvaProfiloOffline(identita);
-          avvioSenzaRete = true;
-          try{ aggiornaIndicatoreRete(); mostraAvvisoOffline(); }catch(_){}
-          return;
-        }
-        authShowOverlay();               // mai entrato su questo dispositivo
-        return;
-      }
-
-      currentUser = null;
-      authShowOverlay();
-      setTimeout(function(){ window.location.reload(); }, 400);
+      authShowOverlay();                 // mai entrato qui: niente da coprire
     } else if(event === 'TOKEN_REFRESHED' && session){
       // Aggiorna JWT su refresh per non perdere autenticazione
       currentJwt = session.access_token;
@@ -415,15 +493,20 @@ async function setupAuth(){
   });
 
   // Verifica sessione esistente
-  var sessRes = null, erroreDiRete = false;
-  try{ sessRes = await client.auth.getSession(); }catch(_e){ erroreDiRete = true; }
+  var sessRes = null;
+  try{ sessRes = await client.auth.getSession(); }catch(_e){}
   var session = sessRes && sessRes.data && sessRes.data.session;
   if(!session){
-    // Senza linea la sessione non si puo verificare, e la libreria puo averla
-    // gia cancellata: fa fede il profilo di bordo. Se invece la linea c'e ed
-    // e davvero uscito, allora si chiede l'accesso.
-    if((erroreDiRete || !isOnline() || cosePendenti()) && avvioOffline()) return;
-    authShowOverlay();
+    // IL PROFILO DI BORDO E SOVRANO: chi e gia entrato su questo dispositivo
+    // non rivede mai la schermata di accesso per un singhiozzo di sessione
+    // (linea assente, servizio momentaneamente giu, gettone da risanare).
+    // Si entra subito col profilo; la sessione si ripara da sola in sottofondo
+    // e, solo se serve per forza un tocco, compare l'invito blu.
+    if(avvioOffline()){
+      if(isOnline()) setTimeout(function(){ riparaSessione('avvio'); }, 800);
+      return;
+    }
+    authShowOverlay();   // mai entrato su questo dispositivo (o dopo «Esci»)
     return;
   }
 
@@ -482,6 +565,7 @@ async function setupAuth(){
   autoPurgeOld();
   refreshTrashBadge();
   // GIRA CHIAMATA: carica pending + attiva realtime sul canale girate
+  _girateAvviate=true;
   setupGirate();
   // Recupera eventuale bozza di nuova chiamata non ancora salvata
   restoreDraft();
@@ -523,6 +607,11 @@ async function authSignInWithGoogle(forceAccountChoice){
     // (utile quando il browser è loggato con account sbagliato e tenta auto-login)
     if(forceAccountChoice){
       opts.options.queryParams = { prompt: 'select_account' };
+    } else {
+      // Se questo dispositivo conosce gia il suo medico, Google va dritto
+      // su quell'account: niente schermata «Scegli un account».
+      var pf = currentUser || profiloOffline();
+      if(pf && pf.email) opts.options.queryParams = { login_hint: pf.email };
     }
     await client.auth.signInWithOAuth(opts);
   } catch(e){
@@ -1080,7 +1169,8 @@ function setupAutoRefresh(){
     var ex=document.getElementById('refreshBanner');
     if(ex)ex.remove();
     driveWarmup();
-    ensureFreshToken().then(function(){
+    ensureFreshToken().then(function(freshOk){
+      if(!freshOk && currentUser && isOnline()) riparaSessione('risveglio');
       // Al risveglio (schermo riacceso, app tornata davanti) parte TUTTO
       // quello che aspettava: chiamate, moduli, allegati, operazioni Drive.
       // Le pause per i vecchi fallimenti si azzerano: la rete e cambiata.
@@ -6061,20 +6151,39 @@ function ricordaToken(tok, durataSec){
 // Autorizzata una volta, da qui in poi ogni dispositivo chiede il proprio
 // lasciapassare e lo riceve senza alcuna finestra.
 var _cassafortePromessa=null;
-var cassaforteVuota=false;      // sappiamo gia che nessuno ha ancora autorizzato
+// «Vuota» non e mai un verdetto eterno: un 404 puo arrivare anche da un
+// servizio che singhiozzava. Passati dieci minuti ci si riprova da soli.
+var cassaforteVuotaFino=0;
+function cassaforteRidalleUnaChance(){ cassaforteVuotaFino=0; }
 function tokenDaCassaforte(){
-  if(cassaforteVuota) return Promise.reject(new Error('cassaforte_vuota'));
+  if(Date.now()<cassaforteVuotaFino) return Promise.reject(new Error('cassaforte_vuota'));
   if(_cassafortePromessa) return _cassafortePromessa;
-  _cassafortePromessa=fetch(SUPABASE_URL+'/functions/v1/google-token',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,
-             'Authorization':'Bearer '+(currentJwt||SUPABASE_ANON_KEY)},
-    body:JSON.stringify({azione:'token'})
-  }).then(function(r){ return r.json().then(function(j){ return {stato:r.status, dati:j}; }); })
+  var chiama=function(){
+    return fetch(SUPABASE_URL+'/functions/v1/google-token',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,
+               'Authorization':'Bearer '+(currentJwt||SUPABASE_ANON_KEY)},
+      body:JSON.stringify({azione:'token'})
+    }).then(function(r){ return r.json().then(function(j){ return {stato:r.status, dati:j}; }); });
+  };
+  // La cassaforte consegna solo a chi ha una sessione valida: se il gettone
+  // di sessione manca lo si rinnova PRIMA, e su un 401 si riprova una volta.
+  _cassafortePromessa=(currentJwt ? Promise.resolve(true) : ensureFreshToken())
+    .then(chiama)
+    .then(function(x){
+      if(x.stato!==401) return x;
+      return ensureFreshToken().then(function(ok){ return ok ? chiama() : x; });
+    })
     .then(function(x){
       _cassafortePromessa=null;
+      if(x.stato===401){
+        // Non e Drive che manca: e la SESSIONE. Si ripara quella, in silenzio.
+        // Niente inviti e niente finestre: il consenso in cassaforte c'e gia.
+        try{ riparaSessione('cassaforte'); }catch(_){}
+        throw new Error('serve_sessione');
+      }
       if(x.stato===404 || (x.dati && x.dati.errore==='non_autorizzata')){
-        cassaforteVuota=true;                       // serve la prima autorizzazione
+        cassaforteVuotaFino=Date.now()+10*60000;    // serve la prima autorizzazione
         throw new Error('cassaforte_vuota');
       }
       if(!x.dati || !x.dati.access_token) throw new Error('cassaforte_ko');
@@ -6152,8 +6261,14 @@ function getDriveToken(interattivo){
   }catch(_){}
   // 1) la cassaforte: nessuna finestra, funziona su ogni dispositivo
   return tokenDaCassaforte()
-    .catch(function(){ return tokenDaBrowser(true); })    // 2) rinnovo silenzioso
     .catch(function(e){
+      // Il consenso c'e gia, e la sessione da risanare: niente browser,
+      // niente inviti, niente finestre. Si riprova a sessione riparata.
+      if(e && e.message==='serve_sessione') throw e;
+      return tokenDaBrowser(true);                        // 2) rinnovo silenzioso
+    })
+    .catch(function(e){
+      if(e && e.message==='serve_sessione') throw e;
       if(interattivo) return tokenDaBrowser(false);       // 3) solo ora si chiede
       driveMostraInvito();
       throw e;
@@ -6193,7 +6308,7 @@ function autorizzaDrivePerSempre(){
       throw Object.assign(new Error('serve_riautorizzazione'), {token:j.access_token});
     }
     if(!j || !j.access_token) throw new Error((j&&j.errore)||'cassaforte_ko');
-    cassaforteVuota=false;
+    cassaforteRidalleUnaChance();
     return ricordaToken(j.access_token, j.expires_in);
   });
 }
@@ -6238,7 +6353,12 @@ function driveWarmup(forza){
   inSfondoDrive(getDriveToken(false).then(function(tok){
     return fetch('https://www.googleapis.com/drive/v3/about?fields=user',{headers:{'Authorization':'Bearer '+tok}});
   }).then(function(r){
-    if(r.status===401 || r.status===403){ clearDriveToken(); driveMostraInvito(); }
+    if(r.status===401 || r.status===403){
+      // Gettone Drive scaduto: si ripesca dalla cassaforte senza disturbare.
+      // Se serve un invito, lo decide getDriveToken (mai per la sessione).
+      clearDriveToken();
+      return getDriveToken(false).then(function(){ driveNascondiInvito(); }).catch(function(){});
+    }
     else if(r.ok){ driveNascondiInvito(); }
   })).catch(function(){ /* rete instabile: non disturbare */ });
 }
@@ -6315,7 +6435,7 @@ function driveFetch(url,opts){
     // Permesso scaduto o revocato → si butta la copia e si riprova UNA volta
     if(r.status===401){
       clearDriveToken();
-      cassaforteVuota=false;      // si ritenta anche la cassaforte
+      cassaforteRidalleUnaChance();   // si ritenta anche la cassaforte
       return getDriveToken(puoChiedere).then(doIt);
     }
     return r;
