@@ -404,6 +404,7 @@ function promuoviAOnline(){
   drenaTuttoSubito(true);
   try{ safeReloadRows(); }catch(_){}
   try{ driveWarmup(true); }catch(_){}
+  try{ if(driveConfigured()) loadGisLibrary(); }catch(_){}
   if(!_girateAvviate){ _girateAvviate=true; try{ setupGirate(); }catch(_){} }
 }
 
@@ -579,6 +580,9 @@ async function setupAuth(){
   setTimeout(function(){ driveWarmup(true); }, 900);
   // Librerie del PDF in cache: il Modulo M si firma anche senza linea
   setTimeout(scaldaLibreriePdf, 2500);
+  // E la libreria dei consensi Google: se mai servira una finestra, si deve
+  // aprire DENTRO il tocco, senza attese (Safari blocca i popup in ritardo)
+  setTimeout(function(){ try{ if(driveConfigured() && isOnline()) loadGisLibrary(); }catch(_){} }, 6000);
   // Una volta al giorno: via i documenti rimasti senza chiamata (nel cestino
   // di Drive, recuperabili). In silenzio, senza mai chiedere permessi.
   setTimeout(function(){ try{ puliziaDriveAutomatica(); }catch(_){} }, 30000);
@@ -6402,9 +6406,9 @@ function driveMostraInvito(){
     // Senza una sessione valida la cassaforte rifiuta qualsiasi cosa (401):
     // prima si risana quella. E siamo dentro un tocco: se il gettone e
     // irrecuperabile si va dritti al riaggancio, con l'account gia scelto.
-    ensureFreshToken().then(function(ok){
+    (currentJwt ? Promise.resolve(true) : ensureFreshToken().then(function(ok){
       return ok || riparaSessione('invito_drive');
-    }).then(function(){
+    })).then(function(){
       if(!currentJwt){
         b.classList.remove('busy');
         versoGoogle();
