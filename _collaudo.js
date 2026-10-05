@@ -162,7 +162,7 @@ function installa(){
       if(min1){
         var idsF = min1[1].split(',');
         return risposta(S.db.chiamate.filter(function(c){ return idsF.indexOf(String(c.id)) !== -1; })
-          .map(function(c){ return { id:c.id }; }));
+          .map(function(c){ return { id:c.id, deleted_at:c.deleted_at||null }; }));
       }
       var mu = path.match(/client_uuid=eq\.([^&]+)/);
       if(mu){
