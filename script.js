@@ -6299,11 +6299,25 @@ function autorizzaDrivePerSempre(){
       try{ cliente.requestCode(); }catch(e){ reject(e); }
     });
   }).then(function(code){
-    return fetch(SUPABASE_URL+'/functions/v1/google-token',{
-      method:'POST',
-      headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,
-               'Authorization':'Bearer '+(currentJwt||SUPABASE_ANON_KEY)},
-      body:JSON.stringify({azione:'autorizza', code:code})
+    var manda=function(){
+      return fetch(SUPABASE_URL+'/functions/v1/google-token',{
+        method:'POST',
+        headers:{'Content-Type':'application/json','apikey':SUPABASE_ANON_KEY,
+                 'Authorization':'Bearer '+(currentJwt||SUPABASE_ANON_KEY)},
+        body:JSON.stringify({azione:'autorizza', code:code})
+      });
+    };
+    // La cassaforte consegna solo a chi ha una sessione valida: su un 401 si
+    // rinnova il gettone e si riprova una volta; se insiste, e la sessione.
+    return manda().then(function(r){
+      if(r.status!==401) return r;
+      return ensureFreshToken().then(function(ok){
+        if(!ok) throw new Error('serve_sessione');
+        return manda();
+      });
+    }).then(function(r){
+      if(r.status===401) throw new Error('serve_sessione');
+      return r;
     });
   }).then(function(r){ return r.json(); }).then(function(j){
     if(j && j.errore==='serve_riautorizzazione'){
@@ -6349,8 +6363,11 @@ function driveWarmup(forza){
   if(!forza && Date.now()-driveWarmupUltimo<5*60000) return;   // max una volta ogni 5 minuti
   driveWarmupUltimo=Date.now();
   if(!driveTokenValidoOra()){
-    // Prima di disturbare: cassaforte e rinnovo silenzioso, senza finestre
-    getDriveToken(false).then(function(){ driveNascondiInvito(); }).catch(function(){ driveMostraInvito(); });
+    // Prima di disturbare: cassaforte e rinnovo silenzioso, senza finestre.
+    // Se a mancare e la SESSIONE, l'invito giusto e quello blu del
+    // riaggancio (ci pensa riparaSessione): quello di Drive sarebbe una bugia.
+    getDriveToken(false).then(function(){ driveNascondiInvito(); })
+      .catch(function(e){ if(!(e && e.message==='serve_sessione')) driveMostraInvito(); });
     return;
   }
   // Il token sembra buono: verifica vera con una chiamata leggerissima
@@ -6378,24 +6395,45 @@ function driveMostraInvito(){
     if(b.classList.contains('busy')) return;
     b.classList.add('busy');
     clearDriveToken();
-    // Si autorizza UNA volta sola: il permesso duraturo va in cassaforte sul
-    // server e da li in poi vale per questo e per ogni altro dispositivo.
-    autorizzaDrivePerSempre().catch(function(e){
-      // Consenso vecchio in mezzo: si revoca e si rifa, una volta sola
-      if(e && e.message==='serve_riautorizzazione') return riautorizzaDriveDaZero(e.token);
-      throw e;
+    var versoGoogle=function(){
+      fb(false,'Prima riagganciamo l\'account Google','La sessione era scaduta: ti mando da Google un attimo (account gi\u00e0 selezionato). Al ritorno Drive e gli allegati si sistemano da soli.');
+      setTimeout(function(){ riLoginConHint(); }, 1200);
+    };
+    // Senza una sessione valida la cassaforte rifiuta qualsiasi cosa (401):
+    // prima si risana quella. E siamo dentro un tocco: se il gettone e
+    // irrecuperabile si va dritti al riaggancio, con l'account gia scelto.
+    ensureFreshToken().then(function(ok){
+      return ok || riparaSessione('invito_drive');
     }).then(function(){
-      driveNascondiInvito();
-      fb(true,'Google Drive autorizzato','Fatto una volta sola: da ora vale su questo e su ogni altro dispositivo, senza piu richieste.');
-    }).catch(function(e){
-      // Se la cassaforte non e disponibile si ripiega sul permesso di un'ora
-      return getDriveToken(true).then(function(){
+      if(!currentJwt){
+        b.classList.remove('busy');
+        versoGoogle();
+        return;
+      }
+      // Si autorizza UNA volta sola: il permesso duraturo va in cassaforte sul
+      // server e da li in poi vale per questo e per ogni altro dispositivo.
+      return autorizzaDrivePerSempre().catch(function(e){
+        // Consenso vecchio in mezzo: si revoca e si rifa, una volta sola
+        if(e && e.message==='serve_riautorizzazione') return riautorizzaDriveDaZero(e.token);
+        throw e;
+      }).then(function(){
         driveNascondiInvito();
-        fb(true,'Google Drive attivo','Allegati e Moduli M sono pronti.');
+        fb(true,'Google Drive autorizzato','Fatto una volta sola: da ora vale su questo e su ogni altro dispositivo, senza piu richieste.');
+      }).catch(function(e){
+        if(e && e.message==='serve_sessione'){
+          b.classList.remove('busy');
+          versoGoogle();
+          return;
+        }
+        // Se la cassaforte non e disponibile si ripiega sul permesso di un'ora
+        return getDriveToken(true).then(function(){
+          driveNascondiInvito();
+          fb(true,'Google Drive attivo','Allegati e Moduli M sono pronti.');
+        });
+      }).catch(function(){
+        b.classList.remove('busy');
+        fb(false,'Autorizzazione non riuscita','Tocca di nuovo l\'avviso per riprovare.');
       });
-    }).catch(function(){
-      b.classList.remove('busy');
-      fb(false,'Autorizzazione non riuscita','Tocca di nuovo l\'avviso per riprovare.');
     });
   });
   document.body.appendChild(b);
