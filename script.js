@@ -3038,6 +3038,9 @@ function disegnaElencoCoda(){
 // Traduce il codice d'errore in una spiegazione leggibile
 function spiegaErrore(codice){
   var c=String(codice||'');
+  if(c.indexOf('chiamata_nel_cestino')!==-1) return 'la chiamata \u00e8 nel cestino: riparte se la ripristini';
+  if(c.indexOf('serve_sessione')!==-1) return 'serve riagganciare l\u2019account Google (tocca l\u2019avviso)';
+  if(c.indexOf('chiamata_sparita')!==-1) return 'la chiamata non esiste pi\u00f9';
   if(c.indexOf('drive_lenta')!==-1) return 'Drive non ha risposto in tempo (rete lenta)';
   if(c.indexOf('pdf_lento')!==-1 || c.indexOf('pdf_')===0) return 'produzione del documento non riuscita';
   if(c.indexOf('script_')===0) return 'librerie del documento non scaricabili';
@@ -3912,6 +3915,7 @@ function trashRestoreOne(id,rowEl){
         renderTrashList(); refreshTrashBadge();
       }
       loadRows(PAGE);
+      riattivaCodePerChiamata(id);
       fb(true,'Ripristinata','Chiamata ripristinata.');
     } else {
       if(rowEl){ rowEl.style.opacity='';rowEl.style.pointerEvents=''; }
@@ -3930,8 +3934,14 @@ function trashHardDeleteOne(id,rowEl){
   }
   rowEl.style.opacity='.5';rowEl.style.pointerEvents='none';
   markOwnWrite();
-  sbFetch('chiamate?id=eq.'+id,{method:'DELETE'}).then(function(res){
+  // PRIMA i documenti su Drive (cancellata la riga non si saprebbe piu quali
+  // erano), poi la riga, e infine la coda di bordo con i pendenti.
+  inSfondoDrive(function(){ return ripuliscDriveDiChiamate('chiamata_id=eq.'+id).catch(function(){ return 0; }); })
+  .then(function(){
+    return sbFetch('chiamate?id=eq.'+id,{method:'DELETE'});
+  }).then(function(res){
     if(res.ok){
+      pulisciCodeLocaliDiChiamate([id]);
       rowEl.style.transition='opacity .25s,transform .25s';
       rowEl.style.opacity='0';rowEl.style.transform='scale(.95)';
       setTimeout(function(){
@@ -3976,6 +3986,7 @@ function trashEmptyAll(){
     chiudi('mtrashEmpty');
     if(btn){btn.disabled=false;btn.innerHTML='Svuota';}
     if(res.ok){
+      pulisciCodeLocaliDiChiamate(idsCestino);
       fb(true,'Cestino svuotato','Tutte le chiamate sono state eliminate definitivamente.');
       renderTrashList();
       refreshTrashBadge();
@@ -4001,16 +4012,19 @@ function autoPurgeOld(){
   var cutoff=new Date(now-TRASH_RETENTION_DAYS*86400000).toISOString();
   markOwnWrite();
   // Anche la pulizia automatica deve portarsi via i documenti su Drive
+  var idsPurge=[];
   sbFetch('chiamate?deleted_at=lt.'+cutoff+'&select=id').then(function(r){ return r.json(); })
    .then(function(righe){
-     var ids=(Array.isArray(righe)?righe:[]).map(function(x){ return x.id; });
-     if(!ids.length) return 0;
-     return inSfondoDrive(function(){ return ripuliscDriveDiChiamate('chiamata_id=in.('+ids.join(',')+')'); });
+     idsPurge=(Array.isArray(righe)?righe:[]).map(function(x){ return x.id; });
+     if(!idsPurge.length) return 0;
+     return inSfondoDrive(function(){ return ripuliscDriveDiChiamate('chiamata_id=in.('+idsPurge.join(',')+')'); });
    })
    .catch(function(){ return 0; })
    .then(function(){
      return sbFetch('chiamate?deleted_at=lt.'+cutoff,{method:'DELETE'});
-   }).then(function(){}).catch(function(){});
+   }).then(function(res){
+     if(res && res.ok && idsPurge.length) pulisciCodeLocaliDiChiamate(idsPurge);
+   }).catch(function(){});
 }
 
 function showUndoBanner(rowId){
@@ -6639,7 +6653,11 @@ function allegCodaDrena(){
     });
     // Niente da inviare: si esce SENZA interrogare il database
     if(!utili.length) return false;
-    return ensureFreshToken().then(function(){
+    return ensureFreshToken().then(function(freshOk){
+      if(!freshOk || !currentJwt){
+        try{ riparaSessione('drenaggio_allegati'); }catch(_){}
+        return false;
+      }
       var catena=Promise.resolve(), fatti=0;
       utili.forEach(function(r){
         catena=catena.then(function(){
@@ -8416,13 +8434,24 @@ function risolviEtichetteProvvisorie(){
 function chiamateEsistenti(ids){
   ids=(ids||[]).filter(function(x){ return /^\d+$/.test(String(x)); });
   if(!ids.length) return Promise.resolve({});
-  return sbFetch('chiamate?id=in.('+ids.join(',')+')&select=id')
-    .then(function(r){ return r.json(); })
-    .then(function(righe){
-      if(!Array.isArray(righe)) return null;      // risposta non certa
-      var vive={};
-      righe.forEach(function(c){ vive[String(c.id)]=true; });
-      return vive;
+  // Senza sessione valida i permessi rendono la risposta VUOTA: un vuoto
+  // bugiardo farebbe passare per morte chiamate vivissime. Niente certezze.
+  if(!currentJwt) return Promise.resolve(null);
+  return sbFetch('chiamate?id=in.('+ids.join(',')+')&select=id,deleted_at')
+    .then(function(r){
+      if(!r.ok) return null;
+      return r.json().then(function(righe){
+        if(!Array.isArray(righe)) return null;    // risposta non certa
+        var vive={};
+        righe.forEach(function(c){ vive[String(c.id)]={cestinata: !!c.deleted_at}; });
+        if(righe.length) return vive;
+        // «Tutte sparite»? Controprova: se il server non vede nemmeno UNA
+        // delle mie chiamate, e un problema di permessi, non una strage.
+        return sbFetch('chiamate?select=id&limit=1')
+          .then(function(r2){ return r2.json(); })
+          .then(function(mie){ return (Array.isArray(mie) && mie.length) ? vive : null; })
+          .catch(function(){ return null; });
+      });
     })
     .catch(function(){ return null; });
 }
@@ -8440,23 +8469,42 @@ function spazzaFantasmi(){
     return chiamateEsistenti(ids).then(function(vive){
       if(vive===null) return false;               // niente certezze, niente pulizie
       var pulizie=[], toccato=false;
+      var SOSPENSIONE=12*3600000;
       r[0].forEach(function(m){
         var k=String(m.chiamata_id);
-        if(/^\d+$/.test(k) && !vive[k]){
+        if(!/^\d+$/.test(k)) return;
+        if(!vive[k]){
           toccato=true;
           traceFantasma('Modulo M', k);
           if(m.drive_file_id) pulizie.push(driveDelete(m.drive_file_id).catch(function(){}));
           pulizie.push(modmCodaCancella(m.chiamata_id));
           delete moduliMLocali[k]; delete moduliMByCall[k];
+          return;
+        }
+        if(vive[k].cestinata && !(m.dopo && m.dopo>Date.now()+3600000)){
+          // Chiamata nel CESTINO = sospensione: il modulo resta al sicuro in
+          // coda ma smette di riprovare. Al ripristino riparte subito.
+          m.dopo=Date.now()+SOSPENSIONE;
+          m.ultimoErrore='chiamata_nel_cestino';
+          toccato=true;
+          pulizie.push(modmCodaScrivi(m));
         }
       });
       r[1].forEach(function(a){
         var k=String(a.chiamata_id);
-        if(/^\d+$/.test(k) && !vive[k]){
+        if(!/^\d+$/.test(k)) return;
+        if(!vive[k]){
           toccato=true;
           traceFantasma('allegato '+(a.nome||''), k);
           if(a.drive_file_id) pulizie.push(driveDelete(a.drive_file_id).catch(function(){}));
           pulizie.push(allegCodaCancella(a.id));
+          return;
+        }
+        if(vive[k].cestinata && !(a.dopo && a.dopo>Date.now()+3600000)){
+          a.dopo=Date.now()+SOSPENSIONE;
+          a.ultimoErrore='chiamata_nel_cestino';
+          toccato=true;
+          pulizie.push(allegCodaScrivi(a));
         }
       });
       if(!toccato) return false;
@@ -8473,6 +8521,59 @@ function traceFantasma(cosa, id){
   try{ console.info('[coda] '+cosa+' della chiamata '+id+' rimosso: la chiamata non esiste piu sul server'); }catch(_){}
 }
 
+// Eliminazione DEFINITIVA di una o piu chiamate: via dalla coda di bordo
+// moduli e allegati pendenti, compresi i documenti gia saliti su Drive.
+function pulisciCodeLocaliDiChiamate(ids){
+  var mappa={};
+  (ids||[]).forEach(function(x){ mappa[String(x)]=1; });
+  if(!Object.keys(mappa).length) return Promise.resolve(false);
+  return Promise.all([modmCodaLeggi(), allegCodaLeggi()]).then(function(r){
+    var lavori=[];
+    r[0].forEach(function(m){
+      var k=String(m.chiamata_id);
+      if(!mappa[k]) return;
+      if(m.drive_file_id) lavori.push(driveDelete(m.drive_file_id).catch(function(){}));
+      lavori.push(modmCodaCancella(m.chiamata_id));
+      delete moduliMLocali[k]; delete moduliMByCall[k];
+    });
+    r[1].forEach(function(a){
+      if(!mappa[String(a.chiamata_id)]) return;
+      if(a.drive_file_id) lavori.push(driveDelete(a.drive_file_id).catch(function(){}));
+      lavori.push(allegCodaCancella(a.id));
+    });
+    if(!lavori.length) return false;
+    return Promise.all(lavori).then(function(){
+      return Promise.all([modmCaricaCodaInMappa(), allegCaricaCodaInMappa()]);
+    }).then(function(){
+      try{ syncRenderBadge(); injectModmUi(); injectAttachRows(); }catch(_){}
+      return true;
+    });
+  }).catch(function(){ return false; });
+}
+
+// Ripristino dal cestino: le code sospese di quella chiamata ripartono subito
+function riattivaCodePerChiamata(id){
+  var k=String(id);
+  return Promise.all([modmCodaLeggi(), allegCodaLeggi()]).then(function(r){
+    var lavori=[];
+    r[0].forEach(function(m){
+      if(String(m.chiamata_id)!==k) return;
+      m.dopo=0; m.tentativi=0; delete m.ultimoErrore;
+      lavori.push(modmCodaScrivi(m));
+    });
+    r[1].forEach(function(a){
+      if(String(a.chiamata_id)!==k) return;
+      a.dopo=0; a.tentativi=0; delete a.ultimoErrore;
+      lavori.push(allegCodaScrivi(a));
+    });
+    if(!lavori.length) return false;
+    return Promise.all(lavori).then(function(){
+      setTimeout(function(){ try{ modmCodaDrena(); allegCodaDrena(); }catch(_){} }, 400);
+      return true;
+    });
+  }).catch(function(){ return false; });
+}
+
 var _modmDrenaggio=false;
 var _modmDaRifare=false;
 function modmCodaDrena(){
@@ -8485,7 +8586,13 @@ function modmCodaDrena(){
     var righe=righeTutte.filter(function(r){ return forza || !r.dopo || r.dopo<=adesso; });
     // Coda vuota: si esce SENZA interrogare il database (niente traffico sprecato)
     if(!righe.length) return false;
-    return ensureFreshToken().then(function(){
+    return ensureFreshToken().then(function(freshOk){
+      if(!freshOk || !currentJwt){
+        // Senza sessione ogni invio fallirebbe in fila: ci si ferma subito,
+        // si risana, e il drenaggio riparte da solo a sessione riparata.
+        try{ riparaSessione('drenaggio_moduli'); }catch(_){}
+        return false;
+      }
       var catena=Promise.resolve(), fatti=0;
       righe.forEach(function(r){
         catena=catena.then(function(){
@@ -8569,6 +8676,20 @@ function modmInvia(rec){
       : sbFetch('moduli_m',{method:'POST',prefer:'return=minimal',body:corpo});
     return req.then(function(res){
       if(!res.ok && res.status!==409) throw new Error('db_'+res.status);
+      if(res.status===409){
+        // Un 409 puo essere un doppione innocuo (va bene cosi) oppure la
+        // chiamata SPARITA nel frattempo (23503): nel secondo caso si pulisce.
+        return res.json().catch(function(){ return {}; }).then(function(j){
+          if(j && String(j.code)==='23503'){
+            var e=new Error('chiamata_sparita');
+            e.driveFileId=(x && x.up && x.up.f) ? x.up.f.id : null;
+            throw e;
+          }
+          return dopoScrittura();
+        });
+      }
+      return dopoScrittura();
+      function dopoScrittura(){
       if(rec.firmato && !x){
         // Salvato senza documento: si tiene in coda solo il compito di
         // produrlo, non tutto il modulo (che ormai e al sicuro sul server).
@@ -8576,8 +8697,19 @@ function modmInvia(rec){
         return modmCodaScrivi(rec).then(function(){ return true; });
       }
       return modmCodaCancella(callId).then(function(){ return true; });
+      }
     });
   }).catch(function(err){
+    if(err && err.message==='chiamata_sparita'){
+      // La chiamata non esiste piu: via il documento appena caricato e via
+      // il compito dalla coda. Niente piu tentativi a vuoto per sempre.
+      traceFantasma('Modulo M', callId);
+      var via=err.driveFileId ? driveDelete(err.driveFileId).catch(function(){}) : Promise.resolve();
+      return via.then(function(){ return modmCodaCancella(callId); }).then(function(){
+        delete moduliMLocali[String(callId)]; delete moduliMByCall[String(callId)];
+        return false;
+      });
+    }
     // Resta in coda, ma con una pausa che cresce: niente martellamento
     rec.tentativi=(rec.tentativi||0)+1;
     rec.dopo=Date.now()+prossimaPausa(rec.tentativi);
