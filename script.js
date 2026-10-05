@@ -6701,7 +6701,11 @@ function allegSegnaFallimento(rec, err){
     rec.dopo=Date.now()+5*60000;      // senza permesso ritentare non serve
     try{ driveMostraInvito(); }catch(_){}
   }
-  return allegCodaScrivi(rec).catch(function(){}).then(function(){ return false; });
+  return allegCodaLeggi().then(function(righe){
+    var ancora=righe.some(function(x){ return String(x.id)===String(rec.id); });
+    if(!ancora) return false;         // tolto dall'utente durante l'invio
+    return allegCodaScrivi(rec).catch(function(){}).then(function(){ return false; });
+  }).catch(function(){ return false; });
 }
 function allegInvia(rec){
   var caricamento;
@@ -8694,7 +8698,11 @@ function modmInvia(rec){
         // Salvato senza documento: si tiene in coda solo il compito di
         // produrlo, non tutto il modulo (che ormai e al sicuro sul server).
         rec.soloDocumento=true;
-        return modmCodaScrivi(rec).then(function(){ return true; });
+        // Solo se il compito e ancora in coda: se l'hai tolto, resta tolto
+        return modmCodaLeggi().then(function(righe){
+          var ancora=righe.some(function(x){ return String(x.chiamata_id)===String(rec.chiamata_id); });
+          return ancora ? modmCodaScrivi(rec) : true;
+        }).then(function(){ return true; });
       }
       return modmCodaCancella(callId).then(function(){ return true; });
       }
@@ -8718,7 +8726,13 @@ function modmInvia(rec){
       rec.dopo=Date.now()+5*60000;
       try{ driveMostraInvito(); }catch(_){}
     }
-    return modmCodaScrivi(rec).catch(function(){}).then(function(){ return false; });
+    // Se nel frattempo l'hai tolto TU dalla coda, tolto resta: il fallimento
+    // non deve far risorgere la voce appena cancellata.
+    return modmCodaLeggi().then(function(righe){
+      var ancora=righe.some(function(x){ return String(x.chiamata_id)===String(rec.chiamata_id); });
+      if(!ancora) return false;
+      return modmCodaScrivi(rec).catch(function(){}).then(function(){ return false; });
+    }).catch(function(){ return false; });
   });
 }
 
@@ -8736,9 +8750,13 @@ function modmPreparaDocumento(callId){
       }
       rec.pdf=blob;
       rec.dopo=0; rec.tentativi=0;
-      return modmCodaScrivi(rec).then(function(){
-        if(isOnline()) setTimeout(function(){ try{ modmCodaDrena(); }catch(_){} }, 100);
-        return true;
+      return modmCodaLeggi().then(function(righe){
+        var ancora=righe.some(function(x){ return String(x.chiamata_id)===String(rec.chiamata_id); });
+        if(!ancora) return false;     // tolto nel frattempo: niente resurrezioni
+        return modmCodaScrivi(rec).then(function(){
+          if(isOnline()) setTimeout(function(){ try{ modmCodaDrena(); }catch(_){} }, 100);
+          return true;
+        });
       });
     });
   }).catch(function(){ return false; });
