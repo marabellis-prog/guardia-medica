@@ -8,6 +8,19 @@
   <meta name="color-scheme" content="only light">
   <meta name="rinvio-torsades-v1" content="https://chiamate-ca.torsadestech.com/">
   <title>Registro Chiamate: indirizzo cambiato</title>
+  <script>
+    // Prima azione della pagina (regola di Stefano del 07/11/2026): rinvio automatico al nuovo indirizzo, con lo stesso
+    // percorso (senza la cartella di prima), i parametri e l'ancora. Se il rinvio non parte o viene bloccato, la pagina
+    // resta con il pulsante «Vai al nuovo indirizzo».
+    (function () {
+      var NUOVO = 'https://chiamate-ca.torsadestech.com/', BASE = '/guardia-medica/';
+      var p = location.pathname, resto = p.indexOf(BASE) === 0 ? p.slice(BASE.length) : '';
+      if (resto === 'index.html' || resto === '404.html') resto = '';
+      window.__rinvioDove = NUOVO + resto.replace(/^\/+/, '') + location.search + location.hash;
+      if (true) { try { location.replace(window.__rinvioDove); } catch (e) {} }
+    })();
+  </script>
+  <noscript><meta http-equiv="refresh" content="0;url=https://chiamate-ca.torsadestech.com/"></noscript>
   <style>
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 16px;
@@ -62,13 +75,8 @@
     <footer>Un programma di <a href="https://torsadestech.com/">Torsades Tech</a></footer>
   </main>
   <script>
-    // Il pulsante porta alla stessa sezione da cui si arrivava (percorso senza la cartella di prima, parametri, ancora).
-    (function () {
-      var NUOVO = 'https://chiamate-ca.torsadestech.com/', BASE = '/guardia-medica/';
-      var p = location.pathname, resto = p.indexOf(BASE) === 0 ? p.slice(BASE.length) : '';
-      if (resto === 'index.html' || resto === '404.html') resto = '';
-      document.getElementById('vai').href = NUOVO + resto + location.search + location.hash;
-    })();
+    // Il pulsante di riserva porta allo stesso punto del rinvio automatico.
+    if (window.__rinvioDove) document.getElementById('vai').href = window.__rinvioDove;
   </script>
 </body>
 </html>
